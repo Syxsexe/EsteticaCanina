@@ -24,7 +24,7 @@ class HomeScreen extends StatelessWidget {
                   const _Logo(),
                   const SizedBox(height: 32),
                   Text(
-                    'Reserva el bano\nde tu perro en\ndos pasos.',
+                    'Reserva el baño\nde tu perro en\ndos pasos.',
                     style: textTheme.displaySmall,
                   ),
                   const SizedBox(height: 16),
@@ -53,12 +53,12 @@ class HomeScreen extends StatelessWidget {
                   const _Step(
                     number: '1',
                     title: 'Elige el servicio',
-                    description: 'Bano, corte, unas, oidos y mas.',
+                    description: 'Baño, corte, uñas, oídos y más.',
                   ),
                   const SizedBox(height: 20),
                   const _Step(
                     number: '2',
-                    title: 'Elige dia y hora',
+                    title: 'Elige día y hora',
                     description: 'Solo ves los espacios libres.',
                   ),
                   const SizedBox(height: 28),
@@ -102,7 +102,7 @@ class _Logo extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           Text(
-            'Estetica canina',
+            'Estética canina',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
           ),
         ],

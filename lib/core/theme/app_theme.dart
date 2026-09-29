@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 
-/// Tema unico de la app. Todo el estilo vive aqui para que las pantallas
+/// Tema único de la app. Todo el estilo vive aquí para que las pantallas
 /// solo usen `Theme.of(context)`.
 class AppTheme {
   const AppTheme._();

@@ -10,7 +10,7 @@ void main() {
 
     expect(find.textContaining('dos pasos'), findsOneWidget);
     expect(find.text('Elige el servicio'), findsOneWidget);
-    expect(find.text('Elige dia y hora'), findsOneWidget);
+    expect(find.text('Elige día y hora'), findsOneWidget);
     expect(find.widgetWithText(ElevatedButton, 'Reservar cita'), findsOneWidget);
   });
 }
