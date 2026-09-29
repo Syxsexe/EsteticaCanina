@@ -21,6 +21,9 @@ class AppColors {
   static const Color textSecondary = Color(0xFF5B7483);
   static const Color border = Color(0xFFD6E4EC);
 
+  /// Líneas finas entre filas de una lista, al estilo de Houndsworth.
+  static const Color hairline = Color(0xFFE3EDF3);
+
   /// Para horarios ya tomados y textos deshabilitados.
   static const Color disabled = Color(0xFF9FB4C0);
 }

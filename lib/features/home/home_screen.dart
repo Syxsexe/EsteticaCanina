@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../booking/service_selection_screen.dart';
 
 /// Pantalla de entrada: presenta la promesa de la app y lleva a la reserva.
 class HomeScreen extends StatelessWidget {
@@ -63,13 +64,11 @@ class HomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 28),
                   ElevatedButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('La reserva llega en el siguiente paso.'),
-                        ),
-                      );
-                    },
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ServiceSelectionScreen(),
+                      ),
+                    ),
                     child: const Text('Reservar cita'),
                   ),
                 ],
