@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/navigation/flow_page_route.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/widgets/brand_logo.dart';
 import '../booking/service_selection_screen.dart';
 
 /// Pantalla de entrada: presenta la promesa de la app y lleva a la reserva.
@@ -22,7 +24,7 @@ class HomeScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _Logo(),
+                  const BrandLogo(),
                   const SizedBox(height: 32),
                   Text(
                     'Reserva el baño\nde tu perro en\ndos pasos.',
@@ -65,7 +67,7 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(height: 28),
                   ElevatedButton(
                     onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
+                      FlowPageRoute<void>(
                         builder: (_) => const ServiceSelectionScreen(),
                       ),
                     ),
@@ -76,35 +78,6 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _Logo extends StatelessWidget {
-  const _Logo();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.navy, width: 1.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Perro Look',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          Text(
-            'Estética canina',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
-          ),
-        ],
       ),
     );
   }

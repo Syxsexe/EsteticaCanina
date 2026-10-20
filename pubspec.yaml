@@ -53,6 +53,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  assets:
+    # La carpeta entera: deja ahí el logotipo y queda disponible sin tocar
+    # este archivo. Ver assets/images/README.md.
+    - assets/images/
+
   fonts:
     # Archivo variable (ejes wdth, wght). Los pesos se piden con
     # FontVariation('wght', n) desde AppTheme.

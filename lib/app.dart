@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/theme/app_theme.dart';
-import 'features/home/home_screen.dart';
+import 'features/splash/splash_screen.dart';
 
 class PerroLookApp extends StatelessWidget {
   const PerroLookApp({super.key});
@@ -12,7 +12,7 @@ class PerroLookApp extends StatelessWidget {
       title: 'Perro Look',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const HomeScreen(),
+      home: const SplashScreen(),
     );
   }
 }
