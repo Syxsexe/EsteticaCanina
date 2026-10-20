@@ -151,7 +151,7 @@ class _SplashScreenState extends State<SplashScreen>
                 child: SlideTransition(
                   position: _taglineOffset,
                   child: Text(
-                    'APP DE RESERVAS',
+                     'APP DE RESERVAS',
                     style: AppTheme.sectionLabel.copyWith(
                       color: AppColors.navy.withValues(alpha: 0.7),
                     ),
