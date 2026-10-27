@@ -4,9 +4,12 @@ import '../../core/format/dates.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/navigation/flow_page_route.dart';
 import '../../core/widgets/section_label.dart';
 import 'data/availability_catalog.dart';
 import 'data/service_catalog.dart';
+import 'booking_confirmed_screen.dart';
+import 'models/booking.dart';
 import 'models/schedule.dart';
 import 'models/service.dart';
 
@@ -144,15 +147,20 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   }
 
   void _confirmar() {
-    final servicio = widget.selection.mainService?.name ?? '';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$servicio · ${formatLongDate(_day.date)} a las '
-          '${formatHour(_start!)}. La confirmación llega en la siguiente '
-          'tanda.',
-        ),
+    final booking = Booking(
+      selection: widget.selection,
+      date: _day.date,
+      startMinutes: _start!,
+    );
+
+    // `pushAndRemoveUntil` en vez de `push`: la confirmación es terminal y
+    // los dos pasos salen de la pila. Si se pudiera volver atrás desde ella,
+    // lo único que se conseguiría es reservar la misma hora dos veces.
+    Navigator.of(context).pushAndRemoveUntil(
+      FlowPageRoute<void>(
+        builder: (_) => BookingConfirmedScreen(booking: booking),
       ),
+      (route) => route.isFirst,
     );
   }
 }

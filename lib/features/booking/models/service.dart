@@ -45,6 +45,17 @@ class BookingSelection {
     return BookingSelection(mainService: mainService, extras: next);
   }
 
+  /// Los servicios elegidos, el principal primero y los extras en el orden
+  /// del catálogo.
+  ///
+  /// La pantalla de confirmación necesita nombrarlos, y resolver ids contra
+  /// el catálogo no es trabajo suyo.
+  List<Service> chosenServices(List<Service> catalog) => [
+        ?mainService,
+        for (final service in catalog)
+          if (extras.contains(service.id)) service,
+      ];
+
   int totalPrice(List<Service> catalog) {
     var total = mainService?.price ?? 0;
     for (final service in catalog) {
