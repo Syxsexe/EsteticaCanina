@@ -142,7 +142,7 @@ class _SplashScreenState extends State<SplashScreen>
                 opacity: _logoOpacity,
                 child: ScaleTransition(
                   scale: _logoScale,
-                  child: const BrandLogo(height: 72),
+                  child: const BrandLogo(height: 132),
                 ),
               ),
               const SizedBox(height: 26),

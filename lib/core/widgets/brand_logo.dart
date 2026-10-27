@@ -10,7 +10,7 @@ import '../theme/app_theme.dart';
 /// logotipo por el definitivo es, entonces, dejar el PNG en su sitio: ninguna
 /// pantalla necesita tocarse.
 class BrandLogo extends StatelessWidget {
-  const BrandLogo({super.key, this.height = 38});
+  const BrandLogo({super.key, this.height = 52});
 
   /// Dónde vive el logotipo. La carpeta ya está declarada en `pubspec.yaml`,
   /// así que basta con copiar el archivo y correr `flutter pub get`.
@@ -18,25 +18,32 @@ class BrandLogo extends StatelessWidget {
 
   /// Alto del logotipo sin contar el marco. El resto de medidas sale de aquí,
   /// de modo que el badge crece entero y no por partes.
+  ///
+  /// El mínimo razonable ronda los 48: el logotipo es una marca cuadrada que
+  /// mete dos palabras y un eslogan, y por debajo de ahí "Estética Canina"
+  /// deja de leerse.
   final double height;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: height * 0.37,
-        vertical: height * 0.26,
-      ),
+      // Márgenes estrechos y parejos: el logotipo ya trae su propio aire
+      // dentro de la imagen, y el marco solo lo recorta contra el azul.
+      padding: EdgeInsets.all(height * 0.12),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(height * 0.37),
+        borderRadius: BorderRadius.circular(height * 0.24),
         border: Border.all(color: AppColors.navy, width: 1.5),
       ),
       child: Image.asset(
         assetPath,
         height: height,
         fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => _Wordmark(height: height),
+        errorBuilder: (_, _, _) => Padding(
+          // Sin imagen queda texto, que sí necesita respirar a los lados.
+          padding: EdgeInsets.symmetric(horizontal: height * 0.18),
+          child: _Wordmark(height: height),
+        ),
       ),
     );
   }

@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/navigation/flow_page_route.dart';
+import '../../core/widgets/section_label.dart';
 import 'data/service_catalog.dart';
 import 'models/service.dart';
+import 'schedule_selection_screen.dart';
 
 /// Paso 1 de la reserva: un servicio principal y los extras que se quieran.
 class ServiceSelectionScreen extends StatefulWidget {
@@ -34,7 +37,7 @@ class _ServiceSelectionScreenState extends State<ServiceSelectionScreen> {
             style: textTheme.bodyMedium,
           ),
           const SizedBox(height: 32),
-          const _SectionLabel('SERVICIO PRINCIPAL'),
+          const SectionLabel('SERVICIO PRINCIPAL'),
           for (final servicio in ServiceCatalog.principales)
             _ServiceRow(
               service: servicio,
@@ -45,7 +48,7 @@ class _ServiceSelectionScreenState extends State<ServiceSelectionScreen> {
               ),
             ),
           const SizedBox(height: 32),
-          const _SectionLabel('EXTRAS'),
+          const SectionLabel('EXTRAS'),
           for (final extra in ServiceCatalog.extras)
             _ServiceRow(
               service: extra,
@@ -61,31 +64,12 @@ class _ServiceSelectionScreenState extends State<ServiceSelectionScreen> {
         total: _selection.totalPrice(catalogo),
         minutes: _selection.totalMinutes(catalogo),
         enabled: _selection.isComplete,
-        onContinue: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('El paso 2 llega en la siguiente tanda.'),
-            ),
-          );
-        },
+        onContinue: () => Navigator.of(context).push(
+          FlowPageRoute<void>(
+            builder: (_) => ScheduleSelectionScreen(selection: _selection),
+          ),
+        ),
       ),
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(text, style: AppTheme.sectionLabel),
-        const SizedBox(width: 12),
-        const Expanded(child: Divider(color: AppColors.hairline)),
-      ],
     );
   }
 }
