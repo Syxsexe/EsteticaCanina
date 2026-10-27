@@ -107,8 +107,13 @@ create table public.citas (
   mascota_id uuid references public.mascotas (id) on delete set null,
   empieza timestamptz not null,
   minutos int not null check (minutos > 0),
-  termina timestamptz
-    generated always as (empieza + make_interval(mins => minutos)) stored,
+  -- Lo calcula el disparador `citas_calcular_fin`, no una columna generada.
+  -- En Postgres `timestamptz + interval` es STABLE y no IMMUTABLE: en cuanto
+  -- el intervalo puede llevar días o meses, el resultado depende de la zona
+  -- horaria de la sesión, y el operador se marca por su peor caso aunque
+  -- aquí solo se le pasen minutos. Una columna generada exige inmutabilidad;
+  -- un disparador no.
+  termina timestamptz not null,
   estado text not null default 'reservada'
     check (estado in ('reservada', 'cumplida', 'cancelada', 'no_asistio')),
   -- Congelado al reservar. Si mañana sube el precio del baño, esta cita
@@ -116,6 +121,22 @@ create table public.citas (
   total_cop int not null check (total_cop >= 0),
   creada_en timestamptz not null default now()
 );
+
+create or replace function public.calcular_fin_cita()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.termina := new.empieza + make_interval(mins => new.minutos);
+  return new;
+end;
+$$;
+
+-- Solo cuando cambia algo que afecte al cálculo: marcar una cita como
+-- cumplida no tiene por qué recalcular nada.
+create trigger citas_calcular_fin
+  before insert or update of empieza, minutos on public.citas
+  for each row execute function public.calcular_fin_cita();
 
 -- La regla que el cliente no puede saltarse.
 --

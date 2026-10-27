@@ -46,3 +46,11 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Configuracion local: a que proyecto de Supabase apunta cada quien.
+#
+# No se ignora por secreto —la anon key viaja dentro de la app compilada y
+# lo que protege los datos es el RLS— sino para que nadie herede por error
+# el proyecto de otro. example.json si se versiona, como plantilla.
+/env/*.json
+!/env/example.json

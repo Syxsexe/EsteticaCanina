@@ -9,17 +9,32 @@ migrations/20261027120000_esquema.sql     tablas y restricciones
 migrations/20261027120100_rls.sql         quién puede ver y escribir qué
 migrations/20261027120200_funciones.sql   las tres llamadas de la app
 seed.sql                                  catálogo y horario de atención
+reset.sql                                 borra todo, para reintentar
 ```
 
-> **Este SQL no se ha ejecutado nunca.** En la máquina donde se escribió no
-> hay `psql`, ni Docker, ni la CLI de Supabase, así que está revisado pero no
-> probado. Aplícalo primero en un proyecto de prueba, no en el bueno.
+> **Este SQL está probado solo en parte.** En la máquina donde se escribió
+> no hay `psql`, ni Docker, ni la CLI de Supabase, así que se valida
+> ejecutándolo en el panel. Si una migración falla a medias, corre
+> `reset.sql` y reintenta desde la primera.
+
+### Errores ya encontrados y corregidos
+
+**`42P17: generation expression is not immutable`**, al crear `citas`.
+`citas.termina` era una columna generada a partir de
+`empieza + make_interval(...)`, y en Postgres `timestamptz + interval` es
+STABLE, no IMMUTABLE: en cuanto el intervalo puede llevar días o meses el
+resultado depende de la zona horaria de la sesión, y el operador se marca
+por su peor caso aunque solo se le pasen minutos. Ahora lo calcula el
+disparador `citas_calcular_fin`, que no tiene esa exigencia.
 
 ## Cómo aplicarlo
 
 **Sin instalar nada**, que es lo que aplica aquí: entra al panel de
 Supabase → *SQL Editor*, y pega los cuatro archivos **en el orden de
 arriba**, uno por uno. Si alguno falla, el mensaje de Postgres dice la línea.
+
+Si algo falla, pega `reset.sql` y vuelve a empezar por el primero. Es
+seguro correrlo sobre un proyecto vacío o a medio crear.
 
 **Con la CLI** (necesita Docker, hoy no instalado):
 
@@ -71,6 +86,68 @@ El catálogo y el horario son públicos a propósito (ver las políticas en
 `rls.sql`). Con OTP cada registro cuesta un mensaje, así que **la sesión se
 pide al confirmar la reserva, no al abrir la app**: mirar servicios y
 horarios libres no debería costarte un SMS por curioso.
+
+## Dónde van las claves del proyecto
+
+En `env/dev.json`, que está en `.gitignore`. La plantilla versionada es
+`env/example.json`: cópiala, rellena los dos valores desde
+*Settings → API* del panel y listo.
+
+```
+.un.ps1              # Chrome en el 5000
+.un.ps1 windows      # escritorio
+./run.sh                # lo mismo desde Git Bash
+```
+
+Los scripts existen porque **Flutter no admite argumentos por defecto a
+nivel de proyecto**: no hay `.flutterrc` ni campo en `pubspec.yaml`, así que
+un `flutter run -d chrome` pelado no puede saber de `env/dev.json`. Sin el
+script habría que acordarse del flag en cada arranque:
+
+```
+flutter run -d chrome --dart-define-from-file=env/dev.json
+```
+
+Y olvidarlo no da un error, sino algo peor: la app arranca con la agenda de
+muestra y parece funcionar. Por eso el script avisa si el archivo falta o
+está vacío.
+
+En VS Code no hace falta nada: `.vscode/launch.json` ya trae dos
+configuraciones con el flag puesto.
+
+**Sin claves la app funciona igual**, con la agenda de muestra. Eso mantiene
+los tests sin red y deja clonar el repo y ejecutar la app sin pedirle
+credenciales a nadie.
+
+Pero cuidado con la simetría: **con** claves y la base caída, la app NO cae
+a la agenda de muestra, sino que muestra un error con *Reintentar*. Es
+deliberado. Enseñarle horarios inventados a alguien que va a reservar es
+peor que no enseñarle nada: reservaría una hora que no existe.
+
+Esa es también la razón de no clavar la URL y la key como `defaultValue` en
+`AppConfig` para ahorrarse el flag. En cuanto `hasSupabase` es cierto
+siempre, lo es también en los tests, donde `Supabase.instance` no está
+inicializado; y el parche natural —un `try/catch` que caiga a datos de
+muestra— es exactamente el comportamiento peligroso de arriba.
+
+### Esto no es un secreto, y conviene saberlo
+
+La **anon key está pensada para vivir dentro del cliente**. Cualquiera puede
+leerla abriendo las DevTools, y en web va en claro dentro de
+`main.dart.js`. Lo que protege los datos es el RLS, no que la clave esté
+escondida.
+
+Por eso tampoco se usó un `.env` con `flutter_dotenv`: en Flutter ese
+archivo hay que declararlo como *asset*, o sea que **se empaqueta dentro de
+la app igualmente**, y encima añade una dependencia y una carga asíncrona
+que puede fallar. No es más seguro; solo lo parece.
+
+Se saca del repo para que cada quien apunte a su propio proyecto, no para
+ocultarlo.
+
+La **`service_role` key es otra cosa**: esa se salta todas las políticas y
+no debe tocar el cliente nunca. Su sitio son las Edge Functions, donde
+Supabase la inyecta sola.
 
 ## Decisiones que conviene entender antes de tocar nada
 

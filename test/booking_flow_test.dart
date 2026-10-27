@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:perro_look/core/theme/app_theme.dart';
 import 'package:perro_look/features/booking/models/service.dart';
 import 'package:perro_look/features/booking/booking_confirmed_screen.dart';
+import 'package:perro_look/features/booking/data/availability_catalog.dart';
+import 'package:perro_look/features/booking/data/availability_repository.dart';
+import 'package:perro_look/features/booking/models/schedule.dart';
 import 'package:perro_look/features/booking/models/booking.dart';
 import 'package:perro_look/features/booking/schedule_selection_screen.dart';
 import 'package:perro_look/features/booking/service_selection_screen.dart';
@@ -49,6 +54,26 @@ Future<void> _abrirPaso2(
     ),
   ));
   await tester.pumpAndSettle();
+}
+
+
+/// Una agenda que nunca llega, para mirar la pantalla mientras espera.
+class _RepositorioLento implements AvailabilityRepository {
+  @override
+  Future<List<DaySchedule>> daysFrom(DateTime from) =>
+      Completer<List<DaySchedule>>().future;
+}
+
+/// Falla la primera vez y responde a partir de la segunda, que es lo que
+/// hace una conexión que se cae y vuelve.
+class _RepositorioIntermitente implements AvailabilityRepository {
+  bool caido = true;
+
+  @override
+  Future<List<DaySchedule>> daysFrom(DateTime from) async {
+    if (caido) throw Exception('sin red');
+    return AvailabilityCatalog.nextDays(from);
+  }
 }
 
 void main() {
@@ -261,6 +286,55 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
       expect(find.byType(ScheduleSelectionScreen), findsNothing);
       expect(find.byType(BookingConfirmedScreen), findsNothing);
+    });
+  });
+
+  group('la agenda tarda o falla', () {
+    testWidgets('mientras carga, la cabecera ya está y el botón espera',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: ScheduleSelectionScreen(
+          selection: const BookingSelection(mainService: bano),
+          repository: _RepositorioLento(),
+        ),
+      ));
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Buscando horarios…'), findsOneWidget);
+
+      // Lo que no depende de la red no parpadea: el titular y la duración
+      // se pintan desde el primer frame.
+      expect(find.textContaining('Elige día'), findsOneWidget);
+      expect(find.textContaining('Tu cita dura 1 h'), findsOneWidget);
+    });
+
+    testWidgets('si falla, lo dice y deja reintentar', (tester) async {
+      final repo = _RepositorioIntermitente();
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: ScheduleSelectionScreen(
+          selection: const BookingSelection(mainService: bano),
+          today: lunes,
+          repository: repo,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('No pudimos traer los horarios'),
+          findsOneWidget);
+      expect(find.widgetWithText(ElevatedButton, 'Elige una hora'),
+          findsOneWidget);
+
+      // Vuelve la conexión y el reintento trae la agenda de verdad.
+      repo.caido = false;
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Reintentar'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('No pudimos traer'), findsNothing);
+      expect(find.text('MAÑANA'), findsOneWidget);
+      expect(find.textContaining('Lunes 2 de noviembre'), findsOneWidget);
     });
   });
 }

@@ -6,7 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/navigation/flow_page_route.dart';
 import '../../core/widgets/section_label.dart';
-import 'data/availability_catalog.dart';
+import 'data/availability_repository.dart';
 import 'data/service_catalog.dart';
 import 'booking_confirmed_screen.dart';
 import 'models/booking.dart';
@@ -24,6 +24,7 @@ class ScheduleSelectionScreen extends StatefulWidget {
     super.key,
     required this.selection,
     this.today,
+    this.repository,
   });
 
   /// Lo elegido en el paso 1.
@@ -37,15 +38,29 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// hoy.
   final DateTime? today;
 
+  /// De dónde sale la agenda.
+  ///
+  /// Nulo significa "la que toque": Postgres si hay credenciales, la de
+  /// muestra si no. Se pasa explícito en los tests, que así no dependen ni
+  /// de la red ni de lo que haya hoy en la base.
+  final AvailabilityRepository? repository;
+
   @override
   State<ScheduleSelectionScreen> createState() =>
       _ScheduleSelectionScreenState();
 }
 
 class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
-  late final List<DaySchedule> _days;
   late final int _minutes;
-  late DaySchedule _day;
+
+  /// Los días, una vez cargados. Nulo mientras se esperan.
+  List<DaySchedule>? _days;
+
+  /// Por qué no se pudieron cargar. Nulo si no ha fallado nada.
+  Object? _fallo;
+
+  /// El día que se está mirando. Nulo hasta que llega la agenda.
+  DaySchedule? _day;
 
   /// El comienzo elegido, en minutos desde medianoche. Nulo mientras no se
   /// haya tocado ninguna hora.
@@ -55,14 +70,37 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   void initState() {
     super.initState();
     _minutes = widget.selection.totalMinutes(ServiceCatalog.todos);
-    _days = AvailabilityCatalog.nextDays(widget.today ?? DateTime.now());
-    // Abrir en un día que sirva le ahorra al cliente el primer rebote. Si no
-    // hay ninguno en dos semanas, se abre en el primero y la pantalla lo
-    // dice con todas las letras.
-    _day = _days.firstWhere(
-      (day) => day.hasRoomFor(_minutes),
-      orElse: () => _days.first,
-    );
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() {
+      _days = null;
+      _fallo = null;
+      _day = null;
+      _start = null;
+    });
+
+    try {
+      final repositorio = widget.repository ?? defaultAvailabilityRepository();
+      final days = await repositorio.daysFrom(
+        widget.today ?? DateTime.now(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _days = days;
+        // Abrir en un día que sirva le ahorra al cliente el primer rebote.
+        // Si no hay ninguno en dos semanas, se abre en el primero y la
+        // pantalla lo dice con todas las letras.
+        _day = days.firstWhere(
+          (day) => day.hasRoomFor(_minutes),
+          orElse: () => days.first,
+        );
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _fallo = error);
+    }
   }
 
   void _elegirDia(DaySchedule day) {
@@ -91,36 +129,66 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
             style: textTheme.bodyMedium,
           ),
           const SizedBox(height: 32),
-          SectionLabel(
-            formatMonth(_day.date).toUpperCase(),
-            trailing: 'Sáb y dom cerrado',
-          ),
-          const SizedBox(height: 12),
-          _DayStrip(
-            days: _days,
-            selected: _day,
-            minutes: _minutes,
-            onSelect: _elegirDia,
-          ),
-          const SizedBox(height: 28),
-          ..._horarios(),
+          // El titular y la duración no dependen de la red, así que se
+          // quedan quietos. Solo la agenda cambia de estado, y así la
+          // pantalla no parpadea entera mientras carga.
+          ..._agenda(),
         ],
       ),
       bottomNavigationBar: _ConfirmBar(
         total: widget.selection.totalPrice(ServiceCatalog.todos),
-        date: _day.date,
+        date: _day?.date,
         start: _start,
         onConfirm: _start == null ? null : _confirmar,
       ),
     );
   }
 
-  /// Las franjas del día elegido, o el motivo por el que no hay ninguna.
-  List<Widget> _horarios() {
-    if (_day.isClosed) {
-      return [_Aviso('La estética no abre el ${formatLongDate(_day.date)}.')];
+  /// La agenda, o lo que haya en su lugar mientras llega o si no llega.
+  List<Widget> _agenda() {
+    if (_fallo != null) {
+      return [
+        _Aviso(
+          'No pudimos traer los horarios. Revisa tu conexión.',
+          onRetry: _cargar,
+        ),
+      ];
     }
-    if (!_day.hasRoomFor(_minutes)) {
+
+    final days = _days;
+    final day = _day;
+    if (days == null || day == null) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 48),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ];
+    }
+
+    return [
+      SectionLabel(
+        formatMonth(day.date).toUpperCase(),
+        trailing: 'Sáb y dom cerrado',
+      ),
+      const SizedBox(height: 12),
+      _DayStrip(
+        days: days,
+        selected: day,
+        minutes: _minutes,
+        onSelect: _elegirDia,
+      ),
+      const SizedBox(height: 28),
+      ..._horarios(day),
+    ];
+  }
+
+  /// Las franjas del día elegido, o el motivo por el que no hay ninguna.
+  List<Widget> _horarios(DaySchedule day) {
+    if (day.isClosed) {
+      return [_Aviso('La estética no abre el ${formatLongDate(day.date)}.')];
+    }
+    if (!day.hasRoomFor(_minutes)) {
       return [
         _Aviso(
           'Ningún hueco de ese día aguanta una cita de '
@@ -129,27 +197,37 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       ];
     }
 
+    // Las franjas son las que traiga el día, no dos fijas. Con la agenda de
+    // muestra siempre son mañana y tarde, pero cuando vengan de la base la
+    // dueña puede cambiarlas y la pantalla no tiene por qué enterarse.
     return [
-      _Franja(
-        titulo: 'MAÑANA',
-        slots: _day.slotsIn(AvailabilityCatalog.morning, _minutes),
-        selected: _start,
-        onSelect: (start) => setState(() => _start = start),
-      ),
-      const SizedBox(height: 24),
-      _Franja(
-        titulo: 'TARDE',
-        slots: _day.slotsIn(AvailabilityCatalog.afternoon, _minutes),
-        selected: _start,
-        onSelect: (start) => setState(() => _start = start),
-      ),
+      for (final (i, window) in day.windows.indexed) ...[
+        if (i > 0) const SizedBox(height: 24),
+        _Franja(
+          titulo: _nombreFranja(window),
+          slots: day.slotsIn(window, _minutes),
+          selected: _start,
+          onSelect: (start) => setState(() => _start = start),
+        ),
+      ],
     ];
+  }
+
+  /// Cómo se llama una franja, deducido de a qué hora empieza.
+  ///
+  /// Se deduce en vez de venir escrito en la base: un rótulo guardado junto
+  /// al horario es un rótulo que alguien acaba dejando en "MAÑANA" para una
+  /// franja de las seis de la tarde.
+  String _nombreFranja(TimeWindow window) {
+    if (window.start < 12 * 60) return 'MAÑANA';
+    if (window.start < 18 * 60) return 'TARDE';
+    return 'NOCHE';
   }
 
   void _confirmar() {
     final booking = Booking(
       selection: widget.selection,
-      date: _day.date,
+      date: _day!.date,
       startMinutes: _start!,
     );
 
@@ -348,9 +426,13 @@ class _TimeChip extends StatelessWidget {
 
 /// Una línea de explicación cuando el día elegido no ofrece nada.
 class _Aviso extends StatelessWidget {
-  const _Aviso(this.text);
+  const _Aviso(this.text, {this.onRetry});
 
   final String text;
+
+  /// Si se pasa, el aviso ofrece volver a intentarlo. Un día cerrado no lo
+  /// necesita —reintentar no lo va a abrir—; un fallo de red sí.
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -360,7 +442,19 @@ class _Aviso extends StatelessWidget {
         color: AppColors.primarySoft,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(text, style: Theme.of(context).textTheme.bodyMedium),
+          if (onRetry != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: onRetry,
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -375,7 +469,10 @@ class _ConfirmBar extends StatelessWidget {
   });
 
   final int total;
-  final DateTime date;
+
+  /// El día elegido, o nulo mientras la agenda no haya llegado.
+  final DateTime? date;
+
   final int? start;
   final VoidCallback? onConfirm;
 
@@ -405,9 +502,12 @@ class _ConfirmBar extends StatelessWidget {
                       Text('TU CITA', style: AppTheme.sectionLabel),
                       const SizedBox(height: 2),
                       Text(
-                        start == null
-                            ? formatLongDate(date)
-                            : '${formatLongDate(date)}, ${formatHour(start!)}',
+                        switch ((date, start)) {
+                          (null, _) => 'Buscando horarios…',
+                          (final d?, null) => formatLongDate(d),
+                          (final d?, final h?) =>
+                            '${formatLongDate(d)}, ${formatHour(h)}',
+                        },
                         style: textTheme.titleMedium,
                       ),
                     ],
