@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/time/salon_time.dart';
 import '../models/schedule.dart';
 import 'availability_repository.dart';
 
@@ -124,14 +125,14 @@ class SupabaseAvailabilityRepository implements AvailabilityRepository {
   /// Agrupa las citas ajenas por el día al que pertenecen.
   ///
   /// Postgres las manda como instantes absolutos; el modelo razona en
-  /// minutos desde medianoche. La conversión usa la zona del dispositivo,
-  /// que para la clientela de una estética de barrio es la de la estética.
-  /// Si algún día importa de verdad, el sitio donde arreglarlo es este.
+  /// minutos desde medianoche del reloj de la estética. La conversión va
+  /// por `enHoraEstetica` y no por `toLocal()`: la zona del dispositivo no
+  /// tiene por qué ser la del negocio.
   static Map<DateTime, List<BusySlot>> _ocupadosPorDia(List<dynamic> filas) {
     final porDia = <DateTime, List<BusySlot>>{};
     for (final fila in filas) {
-      final empieza = DateTime.parse(fila['empieza'] as String).toLocal();
-      final termina = DateTime.parse(fila['termina'] as String).toLocal();
+      final empieza = enHoraEstetica(DateTime.parse(fila['empieza'] as String));
+      final termina = enHoraEstetica(DateTime.parse(fila['termina'] as String));
       final dia = DateTime(empieza.year, empieza.month, empieza.day);
 
       porDia.putIfAbsent(dia, () => []).add(

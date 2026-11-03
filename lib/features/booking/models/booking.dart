@@ -1,3 +1,4 @@
+import '../../../core/time/salon_time.dart';
 import 'service.dart';
 
 /// Una cita cerrada: qué se eligió y cuándo.
@@ -29,12 +30,20 @@ class Booking {
   /// Lo que se paga al terminar.
   int price(List<Service> catalog) => selection.totalPrice(catalog);
 
-  /// El instante en que empieza, en hora local.
-  DateTime get startsAt => DateTime(
-        date.year,
-        date.month,
-        date.day,
-      ).add(Duration(minutes: startMinutes));
+  /// El instante en que empieza.
+  ///
+  /// Se arma con el reloj de la estética y no con el del dispositivo. Esa
+  /// distinción no es teórica: enviar la hora del móvil hacía que Postgres
+  /// leyera las 09:00 como las 04:00 de Bogotá y rechazara la cita.
+  DateTime get startsAt => desdeHoraEstetica(
+        DateTime(
+          date.year,
+          date.month,
+          date.day,
+          startMinutes ~/ 60,
+          startMinutes % 60,
+        ),
+      );
 
   /// El instante en que termina.
   DateTime endsAt(List<Service> catalog) =>

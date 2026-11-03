@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/time/salon_time.dart';
 import '../models/agenda_entry.dart';
 
 /// La agenda desde el lado de la estética.
@@ -110,9 +111,9 @@ class SupabaseAgendaRepository implements AgendaRepository {
 
     return AgendaEntry(
       id: fila['id'] as String,
-      // Postgres manda el instante absoluto; la agenda se lee en la hora
-      // de la estética, que es la del dispositivo.
-      empieza: DateTime.parse(fila['empieza'] as String).toLocal(),
+      // Postgres manda el instante absoluto; la agenda se lee en el reloj
+      // de la estética, que no tiene por qué ser el del dispositivo.
+      empieza: enHoraEstetica(DateTime.parse(fila['empieza'] as String)),
       minutos: fila['minutos'] as int,
       estado: EstadoCita.desde(fila['estado'] as String),
       totalCop: fila['total_cop'] as int,

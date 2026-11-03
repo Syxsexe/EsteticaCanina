@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/session/anonymous_session.dart';
 import '../models/booking.dart';
 import 'service_catalog.dart';
 
@@ -50,7 +51,7 @@ class SupabaseBookingRepository implements BookingRepository {
 
   @override
   Future<String> reservar(Booking booking) async {
-    await _asegurarSesion();
+    await asegurarSesion(_db);
 
     final servicios = [
       for (final s in booking.selection.chosenServices(ServiceCatalog.todos))
@@ -82,15 +83,6 @@ class SupabaseBookingRepository implements BookingRepository {
   /// código y no el mensaje, que cambia en cuanto alguien corrige una tilde.
   static const String _choque = '23P01';
 
-  /// Reservar exige estar identificado, aunque sea sin decir quién.
-  ///
-  /// La sesión se crea aquí y no al abrir la app: mirar servicios y horarios
-  /// no debería costar una cuenta. Cuando entre el OTP por teléfono, este
-  /// usuario anónimo se vincula al número y no se pierde ninguna cita.
-  Future<void> _asegurarSesion() async {
-    if (_db.auth.currentSession != null) return;
-    await _db.auth.signInAnonymously();
-  }
 }
 
 /// El repositorio de reservas que usa la app.

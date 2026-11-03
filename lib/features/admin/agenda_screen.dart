@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/format/dates.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/time/salon_time.dart';
 import '../../core/theme/app_theme.dart';
 import 'data/admin_session.dart';
 import 'data/agenda_repository.dart';
@@ -50,7 +51,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
   void initState() {
     super.initState();
     _repositorio = widget.repository ?? defaultAgendaRepository();
-    final hoy = widget.today ?? DateTime.now();
+    final hoy = widget.today ?? hoyEnLaEstetica();
     _dia = DateTime(hoy.year, hoy.month, hoy.day);
     _cargar();
   }

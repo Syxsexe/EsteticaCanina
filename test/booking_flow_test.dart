@@ -9,6 +9,8 @@ import 'package:perro_look/features/booking/booking_confirmed_screen.dart';
 import 'package:perro_look/features/booking/data/availability_catalog.dart';
 import 'package:perro_look/features/booking/data/availability_repository.dart';
 import 'package:perro_look/features/booking/data/booking_repository.dart';
+import 'package:perro_look/features/booking/data/profile_repository.dart';
+import 'package:perro_look/features/booking/models/customer_profile.dart';
 import 'package:perro_look/features/booking/models/schedule.dart';
 import 'package:perro_look/features/booking/models/booking.dart';
 import 'package:perro_look/features/booking/schedule_selection_screen.dart';
@@ -42,11 +44,18 @@ Future<void> _abrirPaso2(
   required Service servicio,
   BookingRepository? reservas,
   AvailabilityRepository? agenda,
+  ProfileRepository? perfil,
 }) async {
+  // Por defecto, alguien que ya reservó antes: así los tests de reserva
+  // siguen siendo sobre reservar y no sobre pedir datos.
+  perfil ??= SampleProfileRepository(
+    const CustomerProfile(nombre: 'Ana', telefono: '+573001112233'),
+  );
   await tester.pumpWidget(MaterialApp(
     theme: AppTheme.light,
     home: ScheduleSelectionScreen(
       bookingRepository: reservas,
+      profileRepository: perfil,
       repository: agenda,
       // La key obliga a un estado nuevo. Sin ella, un segundo `pumpWidget`
       // en el mismo test reutiliza el elemento anterior —mismo tipo, misma
@@ -262,6 +271,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
       await tester.pumpAndSettle();
+
+      // Este recorrido empieza desde cero, así que pasa por la hoja de
+      // contacto igual que un cliente nuevo.
+      await tester.enterText(find.widgetWithText(TextField, 'Tu nombre'), 'Ana');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tu celular'),
+        '3001112233',
+      );
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Confirmar la cita'));
+      await tester.pumpAndSettle();
     }
 
     testWidgets('la cita confirmada resume día, hora, servicio y total',
@@ -465,6 +484,108 @@ void main() {
       reservas.bloqueo!.complete();
       await tester.pumpAndSettle();
 
+      expect(reservas.guardadas, hasLength(1));
+    });
+  });
+
+  group('datos de contacto', () {
+    Future<void> elegirHora(WidgetTester tester) async {
+      await tester.tap(find.text('09:30'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('la primera vez los pide, y los guarda con la cita',
+        (tester) async {
+      final reservas = _Reservas();
+      final perfil = SampleProfileRepository();
+      await _abrirPaso2(
+        tester,
+        servicio: bano,
+        reservas: reservas,
+        perfil: perfil,
+      );
+      await elegirHora(tester);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      // No se reservó todavía: primero hacen falta los datos.
+      expect(find.text('¿A quién llamamos?'), findsOneWidget);
+      expect(reservas.guardadas, isEmpty);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Tu nombre'), 'Ana');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tu celular'),
+        '300 111 2233',
+      );
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Confirmar la cita'));
+      await tester.pumpAndSettle();
+
+      // El número se guardó normalizado, no como se escribió.
+      final guardado = await perfil.cargar();
+      expect(guardado.nombre, 'Ana');
+      expect(guardado.telefono, '+573001112233');
+      expect(reservas.guardadas, hasLength(1));
+      expect(find.byType(BookingConfirmedScreen), findsOneWidget);
+    });
+
+    testWidgets('cerrar la hoja sin completar no reserva nada',
+        (tester) async {
+      final reservas = _Reservas();
+      await _abrirPaso2(
+        tester,
+        servicio: bano,
+        reservas: reservas,
+        perfil: SampleProfileRepository(),
+      );
+      await elegirHora(tester);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      // Tocar fuera de la hoja la cierra.
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(reservas.guardadas, isEmpty);
+      expect(find.byType(BookingConfirmedScreen), findsNothing);
+      // Y el botón vuelve a estar disponible: no se queda en "Reservando…".
+      expect(find.widgetWithText(ElevatedButton, 'Reservar cita'),
+          findsOneWidget);
+    });
+
+    testWidgets('un celular que no vale no deja continuar', (tester) async {
+      final reservas = _Reservas();
+      await _abrirPaso2(
+        tester,
+        servicio: bano,
+        reservas: reservas,
+        perfil: SampleProfileRepository(),
+      );
+      await elegirHora(tester);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Tu nombre'), 'Ana');
+      // Un fijo: no recibe el recordatorio por mensaje.
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tu celular'),
+        '6017654321',
+      );
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Confirmar la cita'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Escribe un celular colombiano.'), findsOneWidget);
+      expect(reservas.guardadas, isEmpty);
+    });
+
+    testWidgets('a quien ya dio sus datos no se los vuelven a pedir',
+        (tester) async {
+      final reservas = _Reservas();
+      await _abrirPaso2(tester, servicio: bano, reservas: reservas);
+      await elegirHora(tester);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('¿A quién llamamos?'), findsNothing);
       expect(reservas.guardadas, hasLength(1));
     });
   });

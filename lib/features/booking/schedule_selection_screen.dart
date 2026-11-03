@@ -3,15 +3,18 @@ import 'package:flutter/material.dart';
 import '../../core/format/dates.dart';
 import '../../core/format/money.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/time/salon_time.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/navigation/flow_page_route.dart';
 import '../../core/widgets/section_label.dart';
 import 'data/availability_repository.dart';
 import 'data/booking_repository.dart';
+import 'data/profile_repository.dart';
 import 'data/service_catalog.dart';
 import 'booking_confirmed_screen.dart';
 import 'models/booking.dart';
 import 'models/schedule.dart';
+import 'widgets/contact_sheet.dart';
 import 'models/service.dart';
 
 /// Paso 2 de la reserva: el día y la hora.
@@ -27,6 +30,7 @@ class ScheduleSelectionScreen extends StatefulWidget {
     this.today,
     this.repository,
     this.bookingRepository,
+    this.profileRepository,
   });
 
   /// Lo elegido en el paso 1.
@@ -50,6 +54,9 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// Quién guarda la cita. Nulo significa "el que toque", igual que
   /// [repository].
   final BookingRepository? bookingRepository;
+
+  /// Quién sabe el nombre y el teléfono del cliente.
+  final ProfileRepository? profileRepository;
 
   @override
   State<ScheduleSelectionScreen> createState() =>
@@ -94,7 +101,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     try {
       final repositorio = widget.repository ?? defaultAvailabilityRepository();
       final days = await repositorio.daysFrom(
-        widget.today ?? DateTime.now(),
+        widget.today ?? hoyEnLaEstetica(),
       );
       if (!mounted) return;
       setState(() {
@@ -247,6 +254,25 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     final navegador = Navigator.of(context);
 
     try {
+      // Sin un teléfono al que escribir, la cita no se puede confirmar ni
+      // recordar. Así que se piden los datos antes de guardar nada, y solo
+      // la primera vez: después quedan en el perfil.
+      final perfiles = widget.profileRepository ?? defaultProfileRepository();
+      var perfil = await perfiles.cargar();
+
+      if (!perfil.completo) {
+        if (!mounted) return;
+        final datos = await pedirDatosDeContacto(context, actual: perfil);
+        if (datos == null) {
+          // Cerró la hoja sin completar: no hay cita.
+          if (!mounted) return;
+          setState(() => _guardando = false);
+          return;
+        }
+        await perfiles.guardar(datos);
+        perfil = datos;
+      }
+
       // Guardar primero y navegar después. Al revés, la pantalla diría
       // "¡Cita confirmada!" antes de saber si lo está.
       final repositorio = widget.bookingRepository ?? defaultBookingRepository();

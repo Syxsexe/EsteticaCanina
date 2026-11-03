@@ -46,6 +46,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.8
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -96,3 +98,44 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Icono de la app, generado con `dart run flutter_launcher_icons`.
+#
+# El icono NO es logo.png a sangre: Android lo recorta en círculo y el
+# logotipo llega casi al borde. icon.png es el mismo logotipo centrado al
+# 44%, y ese número sale de una cuenta, no del ojo: Android deja visible el
+# 66,7% central de la imagen, y un cuadrado inscrito en un círculo solo
+# puede ocupar el 70,7% de su diámetro. 0,667 x 0,707 = 0,47 es el máximo
+# absoluto antes de que se corten las esquinas de "Perro" y de "LOOK".
+flutter_launcher_icons:
+  image_path: "assets/images/icon.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+
+  # El fondo va blanco y no azul porque el logotipo trae su propio fondo
+  # blanco incrustado —es un JPEG reguardado, sin canal alfa— y recortarlo
+  # dejaría agujeros: las letras de "Perro" y "LOOK" son blancas por dentro.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/icon.png"
+
+# El splash nativo: lo que se ve ANTES de que Flutter dibuje su primer
+# frame. Sin esto sale el logo de Flutter sobre blanco, y luego salta al
+# azul de nuestro splash. Con el mismo azul en los dos, el relevo no se
+# nota.
+#
+# Es un paquete distinto a flutter_launcher_icons, aunque se configuren
+# parecido. Se regenera con `dart run flutter_native_splash:create`.
+flutter_native_splash:
+  color: "#4CBDE7"
+  image: "assets/images/icon.png"
+  android: true
+  ios: true
+  web: false
+
+  # Android 12+ no usa la imagen a pantalla completa: recorta un círculo en
+  # el centro. El icono ya viene con su margen, así que encaja.
+  android_12:
+    color: "#4CBDE7"
+    image: "assets/images/icon.png"
+    icon_background_color: "#FFFFFF"
