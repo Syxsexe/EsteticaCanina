@@ -94,8 +94,10 @@ En `env/dev.json`, que está en `.gitignore`. La plantilla versionada es
 *Settings → API* del panel y listo.
 
 ```
-.un.ps1              # Chrome en el 5000
-.un.ps1 windows      # escritorio
+.
+un.ps1              # Chrome en el 5000
+.
+un.ps1 windows      # escritorio
 ./run.sh                # lo mismo desde Git Bash
 ```
 
@@ -172,6 +174,58 @@ catálogo no reescribe el historial.
 **Un día sin filas en `horario_atencion` es un día cerrado.** Por eso el
 seed solo inserta de lunes a viernes. Es la misma convención que en Dart,
 donde un `DaySchedule` sin franjas está cerrado.
+
+## Darle acceso de administradora a la dueña
+
+El rol vive en la tabla `admins`, que **tiene RLS activo y ninguna política**:
+desde la app no se lee ni se escribe. Se administra solo desde el panel, que
+es donde debe estar la decisión de quién manda.
+
+**1. Crear la cuenta.** En *Authentication → Users → Add user*, con correo y
+contraseña.
+
+Para la dueña, correo y contraseña es lo correcto aunque para los clientes
+no lo sea: ella entra a diario desde su propio dispositivo, así que no la
+olvida, y no cuesta ningún SMS.
+
+**2. Nombrarla administradora**, en el SQL Editor:
+
+```sql
+insert into public.admins (id, anotacion)
+select id, 'dueña de la estética'
+from auth.users
+where email = 'el-correo-que-pusiste@ejemplo.com'
+on conflict (id) do nothing;
+
+-- Comprobar
+select a.id, u.email, a.anotacion
+from public.admins a join auth.users u on u.id = a.id;
+```
+
+**3. Quitarle el acceso**, si hiciera falta:
+
+```sql
+delete from public.admins
+where id = (select id from auth.users where email = '...');
+```
+
+Nada más. Las políticas de administración consultan `es_admin()`, así que
+el acceso se enciende y se apaga con esa fila.
+
+### Qué puede hacer, y qué no
+
+| | Cliente | Estética |
+|---|---|---|
+| Catálogo y horario | ve los activos | ve y **edita** todo |
+| Horas ocupadas | solo hora de inicio y fin | la cita entera |
+| Citas | solo las suyas | **todas** |
+| Marcar cumplida / no asistió | no | **sí** |
+| Perfiles y mascotas | los suyos | **todos** |
+| Cerrar días | no | **sí** |
+
+Sigue sin poder **borrar** citas: no hay política de `delete`. Una cita
+equivocada se cancela, no se hace desaparecer — el historial de un negocio
+no debería tener agujeros.
 
 ## Lo que falta
 

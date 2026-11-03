@@ -8,6 +8,7 @@ import 'package:perro_look/features/booking/models/service.dart';
 import 'package:perro_look/features/booking/booking_confirmed_screen.dart';
 import 'package:perro_look/features/booking/data/availability_catalog.dart';
 import 'package:perro_look/features/booking/data/availability_repository.dart';
+import 'package:perro_look/features/booking/data/booking_repository.dart';
 import 'package:perro_look/features/booking/models/schedule.dart';
 import 'package:perro_look/features/booking/models/booking.dart';
 import 'package:perro_look/features/booking/schedule_selection_screen.dart';
@@ -39,10 +40,14 @@ const cachorro = Service(
 Future<void> _abrirPaso2(
   WidgetTester tester, {
   required Service servicio,
+  BookingRepository? reservas,
+  AvailabilityRepository? agenda,
 }) async {
   await tester.pumpWidget(MaterialApp(
     theme: AppTheme.light,
     home: ScheduleSelectionScreen(
+      bookingRepository: reservas,
+      repository: agenda,
       // La key obliga a un estado nuevo. Sin ella, un segundo `pumpWidget`
       // en el mismo test reutiliza el elemento anterior —mismo tipo, misma
       // posición— y no vuelve a pasar por `initState`, así que la pantalla
@@ -72,6 +77,36 @@ class _RepositorioIntermitente implements AvailabilityRepository {
   @override
   Future<List<DaySchedule>> daysFrom(DateTime from) async {
     if (caido) throw Exception('sin red');
+    return AvailabilityCatalog.nextDays(from);
+  }
+}
+
+/// Anota lo que se le pide guardar, y falla cuando se le dice.
+class _Reservas implements BookingRepository {
+  final List<Booking> guardadas = [];
+
+  /// Si no es nulo, se lanza en vez de guardar.
+  Object? falla;
+
+  /// Si no es nulo, `reservar` se queda esperando hasta que se complete.
+  Completer<void>? bloqueo;
+
+  @override
+  Future<String> reservar(Booking booking) async {
+    if (bloqueo != null) await bloqueo!.future;
+    if (falla != null) throw falla!;
+    guardadas.add(booking);
+    return 'cita-1';
+  }
+}
+
+/// La agenda de muestra, contando cuántas veces se la piden.
+class _AgendaContada implements AvailabilityRepository {
+  int consultas = 0;
+
+  @override
+  Future<List<DaySchedule>> daysFrom(DateTime from) async {
+    consultas++;
     return AvailabilityCatalog.nextDays(from);
   }
 }
@@ -335,6 +370,102 @@ void main() {
       expect(find.textContaining('No pudimos traer'), findsNothing);
       expect(find.text('MAÑANA'), findsOneWidget);
       expect(find.textContaining('Lunes 2 de noviembre'), findsOneWidget);
+    });
+  });
+
+  group('guardar la cita', () {
+    /// Elige las 09:30 del lunes 2, que están libres para una cita de 1 h.
+    Future<void> elegirHora(WidgetTester tester) async {
+      await tester.tap(find.text('09:30'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('se guarda antes de dar por confirmada la cita',
+        (tester) async {
+      final reservas = _Reservas();
+      await _abrirPaso2(tester, servicio: bano, reservas: reservas);
+      await elegirHora(tester);
+
+      expect(reservas.guardadas, isEmpty);
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      // Se guardó lo que se eligió, no otra cosa.
+      final guardada = reservas.guardadas.single;
+      expect(guardada.startMinutes, 9 * 60 + 30);
+      expect(guardada.date, lunes);
+      expect(guardada.selection.mainService?.id, 'bano');
+
+      // Y solo entonces aparece la confirmación.
+      expect(find.byType(BookingConfirmedScreen), findsOneWidget);
+    });
+
+    testWidgets('si el hueco se ocupó, no confirma y recarga la agenda',
+        (tester) async {
+      final reservas = _Reservas()..falla = const SlotTakenException();
+      final agenda = _AgendaContada();
+      await _abrirPaso2(
+        tester,
+        servicio: bano,
+        reservas: reservas,
+        agenda: agenda,
+      );
+      await elegirHora(tester);
+      expect(agenda.consultas, 1);
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      // Lo que no debe pasar bajo ningún concepto.
+      expect(find.byType(BookingConfirmedScreen), findsNothing);
+
+      expect(find.textContaining('Alguien tomó esa hora'), findsOneWidget);
+      // La agenda que se estaba viendo ya era falsa, así que se vuelve a
+      // pedir: al reaparecer, ese hueco saldrá tachado.
+      expect(agenda.consultas, 2);
+      // Y la hora elegida se descarta con la recarga.
+      expect(find.widgetWithText(ElevatedButton, 'Elige una hora'),
+          findsOneWidget);
+    });
+
+    testWidgets('si falla por cualquier otra cosa, tampoco confirma',
+        (tester) async {
+      final reservas = _Reservas()..falla = Exception('sin red');
+      await _abrirPaso2(tester, servicio: bano, reservas: reservas);
+      await elegirHora(tester);
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BookingConfirmedScreen), findsNothing);
+      expect(find.textContaining('No pudimos guardar la cita'), findsOneWidget);
+      // La hora sigue elegida: reintentar es razonable aquí, a diferencia
+      // del choque.
+      expect(find.widgetWithText(ElevatedButton, 'Reservar cita'),
+          findsOneWidget);
+    });
+
+    testWidgets('dos toques seguidos no mandan dos reservas', (tester) async {
+      final reservas = _Reservas()..bloqueo = Completer<void>();
+      await _abrirPaso2(tester, servicio: bano, reservas: reservas);
+      await elegirHora(tester);
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Reservar cita'));
+      await tester.pump();
+
+      // El botón lo dice y deja de aceptar toques.
+      final boton = find.widgetWithText(ElevatedButton, 'Reservando…');
+      expect(boton, findsOneWidget);
+      expect(tester.widget<ElevatedButton>(boton).onPressed, isNull);
+
+      await tester.tap(boton);
+      await tester.pump();
+
+      reservas.bloqueo!.complete();
+      await tester.pumpAndSettle();
+
+      expect(reservas.guardadas, hasLength(1));
     });
   });
 }

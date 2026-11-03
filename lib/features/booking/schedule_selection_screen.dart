@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/navigation/flow_page_route.dart';
 import '../../core/widgets/section_label.dart';
 import 'data/availability_repository.dart';
+import 'data/booking_repository.dart';
 import 'data/service_catalog.dart';
 import 'booking_confirmed_screen.dart';
 import 'models/booking.dart';
@@ -25,6 +26,7 @@ class ScheduleSelectionScreen extends StatefulWidget {
     required this.selection,
     this.today,
     this.repository,
+    this.bookingRepository,
   });
 
   /// Lo elegido en el paso 1.
@@ -44,6 +46,10 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// muestra si no. Se pasa explícito en los tests, que así no dependen ni
   /// de la red ni de lo que haya hoy en la base.
   final AvailabilityRepository? repository;
+
+  /// Quién guarda la cita. Nulo significa "el que toque", igual que
+  /// [repository].
+  final BookingRepository? bookingRepository;
 
   @override
   State<ScheduleSelectionScreen> createState() =>
@@ -65,6 +71,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   /// El comienzo elegido, en minutos desde medianoche. Nulo mientras no se
   /// haya tocado ninguna hora.
   int? _start;
+
+  /// Cierto mientras la cita se está guardando. Bloquea el botón: sin esto,
+  /// dos toques seguidos mandan dos reservas.
+  bool _guardando = false;
 
   @override
   void initState() {
@@ -139,7 +149,8 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
         total: widget.selection.totalPrice(ServiceCatalog.todos),
         date: _day?.date,
         start: _start,
-        onConfirm: _start == null ? null : _confirmar,
+        guardando: _guardando,
+        onConfirm: _start == null || _guardando ? null : _confirmar,
       ),
     );
   }
@@ -224,22 +235,53 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     return 'NOCHE';
   }
 
-  void _confirmar() {
+  Future<void> _confirmar() async {
     final booking = Booking(
       selection: widget.selection,
       date: _day!.date,
       startMinutes: _start!,
     );
 
-    // `pushAndRemoveUntil` en vez de `push`: la confirmación es terminal y
-    // los dos pasos salen de la pila. Si se pudiera volver atrás desde ella,
-    // lo único que se conseguiría es reservar la misma hora dos veces.
-    Navigator.of(context).pushAndRemoveUntil(
-      FlowPageRoute<void>(
-        builder: (_) => BookingConfirmedScreen(booking: booking),
-      ),
-      (route) => route.isFirst,
-    );
+    setState(() => _guardando = true);
+    final mensajero = ScaffoldMessenger.of(context);
+    final navegador = Navigator.of(context);
+
+    try {
+      // Guardar primero y navegar después. Al revés, la pantalla diría
+      // "¡Cita confirmada!" antes de saber si lo está.
+      final repositorio = widget.bookingRepository ?? defaultBookingRepository();
+      await repositorio.reservar(booking);
+
+      if (!mounted) return;
+      // `pushAndRemoveUntil` en vez de `push`: la confirmación es terminal y
+      // los dos pasos salen de la pila. Si se pudiera volver atrás desde
+      // ella, lo único que se conseguiría es reservar dos veces.
+      navegador.pushAndRemoveUntil(
+        FlowPageRoute<void>(
+          builder: (_) => BookingConfirmedScreen(booking: booking),
+        ),
+        (route) => route.isFirst,
+      );
+    } on SlotTakenException {
+      if (!mounted) return;
+      setState(() => _guardando = false);
+      mensajero.showSnackBar(
+        const SnackBar(
+          content: Text('Alguien tomó esa hora hace un momento. Elige otra.'),
+        ),
+      );
+      // Recargar no es cortesía: la agenda que se está viendo ya es falsa, y
+      // al volver se verá ese hueco tachado.
+      await _cargar();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _guardando = false);
+      mensajero.showSnackBar(
+        const SnackBar(
+          content: Text('No pudimos guardar la cita. Intenta de nuevo.'),
+        ),
+      );
+    }
   }
 }
 
@@ -465,6 +507,7 @@ class _ConfirmBar extends StatelessWidget {
     required this.total,
     required this.date,
     required this.start,
+    required this.guardando,
     required this.onConfirm,
   });
 
@@ -474,6 +517,10 @@ class _ConfirmBar extends StatelessWidget {
   final DateTime? date;
 
   final int? start;
+
+  /// Mientras se guarda, el botón lo dice y no acepta más toques.
+  final bool guardando;
+
   final VoidCallback? onConfirm;
 
   @override
@@ -523,7 +570,11 @@ class _ConfirmBar extends StatelessWidget {
               child: ElevatedButton(
                 onPressed: onConfirm,
                 child: Text(
-                  onConfirm == null ? 'Elige una hora' : 'Reservar cita',
+                  switch ((guardando, start)) {
+                    (true, _) => 'Reservando…',
+                    (false, null) => 'Elige una hora',
+                    (false, _) => 'Reservar cita',
+                  },
                 ),
               ),
             ),

@@ -127,9 +127,15 @@ begin
 exception
   -- Lo lanza la restricción `sin_solapes`: alguien reservó ese hueco entre
   -- que la pantalla se dibujó y el cliente pulsó.
+  --
+  -- Se vuelve a lanzar con el MISMO código, `exclusion_violation` (23P01),
+  -- y no con el genérico P0001. Así el cliente distingue este caso —que
+  -- tiene su propia respuesta: recargar la agenda y pedir otra hora— de
+  -- cualquier otro fallo, sin tener que mirar el texto del mensaje, que
+  -- cambia en cuanto alguien corrige una tilde.
   when exclusion_violation then
     raise exception 'Ese horario lo acaban de tomar, elige otro'
-      using errcode = 'P0001';
+      using errcode = 'exclusion_violation';
 end;
 $$;
 

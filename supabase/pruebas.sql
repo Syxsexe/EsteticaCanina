@@ -88,3 +88,43 @@ select * from horarios_ocupados(current_date, current_date + 14);
 delete from citas;
 -- El usuario de prueba puede quedarse; si molesta, bórralo desde el panel
 -- y su perfil se va con él por el `on delete cascade`.
+
+-- ===========================================================================
+-- 6. El rol de administradora
+-- ===========================================================================
+--
+-- Requiere haber aplicado 20261103130000_rol_admin.sql y haber nombrado a
+-- alguien administradora (ver el README).
+
+-- 6a. ¿Quién es administradora?
+select a.id, u.email, a.anotacion
+from public.admins a join auth.users u on u.id = a.id;
+-- Esperado: la fila de la dueña. Si está vacío, falta el insert.
+
+-- 6b. La función responde. Desde el SQL Editor no hay sesión, así que
+--     auth.uid() es nulo y debe dar false. Que diga false aquí es lo
+--     correcto: significa que no concede acceso a quien no se identificó.
+select public.es_admin() as deberia_ser_false;
+
+-- 6c. Las políticas de administración existen.
+select tablename, policyname
+from pg_policies
+where schemaname = 'public' and policyname like 'la estética%'
+order by tablename, policyname;
+-- Esperado: 8 filas, sobre citas (2), perfiles, mascotas, cita_servicios,
+-- servicios, horario_atencion y cierres.
+
+-- 6d. La columna de la nota entró.
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name = 'citas'
+  and column_name = 'notas_estilista';
+-- Esperado: 1 fila, text.
+
+-- 6e. Nadie puede leer `admins` desde la app. Esta tabla tiene RLS activo
+--     y ninguna política, así que la consulta de abajo debe devolver 0
+--     filas para cualquiera que no sea el rol `postgres` del editor.
+select count(*) as politicas_sobre_admins
+from pg_policies where schemaname = 'public' and tablename = 'admins';
+-- Esperado: 0. Si algún día aparece una política aquí, alguien abrió la
+-- puerta de quién manda y conviene saber por qué.
