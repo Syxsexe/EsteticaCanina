@@ -6,7 +6,7 @@
 - [x] 1.2 Añadir RLS y políticas de select, insert, update y delete sobre `observaciones` que exijan `es_admin()`; verificar con una cuenta no administradora que lee cero filas y que el insert es rechazado.
 - [x] 1.3 Extraer la validación y escritura compartida a `crear_cita_para(...)` y reescribir `reservar_cita()` para usarla; verificar que reservar como cliente sigue calculando precio, duración y rechazando solapes.
 - [x] 1.4 Crear `reservar_cita_admin(p_cliente_id, p_mascota_id, p_empieza, p_servicios)` con comprobación `es_admin()`, cliente existente y mascota del cliente; verificar que una cuenta no administradora recibe rechazo.
-- [ ] 1.5 Crear `editar_cita_admin(p_cita_id, p_empieza, p_mascota_id, p_servicios, p_estado, p_notas)` que recalcule total y minutos y reemplace `cita_servicios`; verificar que cambiar servicios actualiza el total y que un horario ocupado devuelve `23P01`.
+- [x] 1.5 Crear `editar_cita_admin(p_cita_id, p_empieza, p_mascota_id, p_servicios, p_estado, p_notas)` que recalcule total y minutos y reemplace `cita_servicios`; verificar que cambiar servicios actualiza el total y que un horario ocupado devuelve `23P01`.
 - [x] 1.6 Verificar que una cita se puede cancelar con un update de `estado` a `cancelada` y que no existe política de `delete` sobre `citas`.
 
 ## 2. Modelos y repositorios
@@ -56,4 +56,4 @@
 - [x] 7.2 Generar `base.txt` con el esquema, RLS, funciones y seed actuales más el alta del administrador por correo; verificar que un SQL limpio lo ejecuta en orden sin errores.
 - [x] 7.3 Ejecutar `flutter analyze` y corregir todos los avisos nuevos.
 - [x] 7.4 Ejecutar `flutter test` y verificar que toda la suite pasa sin red.
-- [ ] 7.5 Probar el flujo completo en Supabase: login, cuatro pestañas, crear cita, editarla, cancelarla y crear una observación.
+- [x] 7.5 Probar el flujo completo en Supabase: login, cuatro pestañas, crear cita, editarla, cancelarla y crear una observación.

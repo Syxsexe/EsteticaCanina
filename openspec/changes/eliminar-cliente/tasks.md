@@ -17,7 +17,7 @@
 ## 4. Verificación integrada
 
 - [x] 4.1 Ejecutar `flutter analyze` y `flutter test` y verificar que no hay avisos nuevos y que toda la suite pasa sin red.
-- [ ] 4.2 Probar contra Supabase con un cliente de prueba que tenga una cita pasada cumplida, una futura reservada, una mascota con nota y una observación. Al eliminarlo:
+- [x] 4.2 Probar contra Supabase con un cliente de prueba que tenga una cita pasada cumplida, una futura reservada, una mascota con nota y una observación. Al eliminarlo:
   - desaparece de Clientes;
   - la cita pasada sale como "Cliente eliminado" y los ingresos de su mes no cambian;
   - la futura queda cancelada y su hora libre;

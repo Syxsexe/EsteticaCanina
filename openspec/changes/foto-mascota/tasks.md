@@ -40,7 +40,7 @@
 ## 5. Verificación integrada
 
 - [x] 5.1 Ejecutar `flutter analyze` y `flutter test` y verificar que no hay avisos nuevos y que toda la suite pasa sin red.
-- [ ] 5.2 Probar contra Supabase en Android y en Chrome:
+- [x] 5.2 Probar contra Supabase en Android y en Chrome:
   - subir una foto JPG grande y comprobar en el panel de Storage que se guardó un `.webp` de 1280 px como máximo;
   - cambiarla y comprobar que la anterior desapareció;
   - quitarla;

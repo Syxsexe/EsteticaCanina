@@ -27,7 +27,7 @@
 ## 5. Verificación integrada
 
 - [x] 5.1 Ejecutar `flutter analyze` y `flutter test` y verificar que no hay avisos nuevos y que toda la suite pasa sin red.
-- [ ] 5.2 Probar contra Supabase: el desplegable lista los meses desde la primera cita real; las métricas y citas de un mes pasado coinciden con una consulta en el SQL Editor; y el mes en curso se ve igual que antes.
+- [x] 5.2 Probar contra Supabase: el desplegable lista los meses desde la primera cita real; las métricas y citas de un mes pasado coinciden con una consulta en el SQL Editor; y el mes en curso se ve igual que antes.
 
 ## Workflow follow-up
 
