@@ -9,12 +9,10 @@ import '../../core/navigation/flow_page_route.dart';
 import '../../core/widgets/section_label.dart';
 import 'data/availability_repository.dart';
 import 'data/booking_repository.dart';
-import 'data/profile_repository.dart';
 import 'data/service_catalog.dart';
-import 'booking_confirmed_screen.dart';
+import 'identification_screen.dart';
 import 'models/booking.dart';
 import 'models/schedule.dart';
-import 'widgets/contact_sheet.dart';
 import 'models/service.dart';
 
 /// Paso 2 de la reserva: el día y la hora.
@@ -30,7 +28,6 @@ class ScheduleSelectionScreen extends StatefulWidget {
     this.today,
     this.repository,
     this.bookingRepository,
-    this.profileRepository,
   });
 
   /// Lo elegido en el paso 1.
@@ -51,12 +48,9 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// de la red ni de lo que haya hoy en la base.
   final AvailabilityRepository? repository;
 
-  /// Quién guarda la cita. Nulo significa "el que toque", igual que
-  /// [repository].
+  /// Quién guarda la cita en el paso 3. Nulo significa "el que toque",
+  /// igual que [repository].
   final BookingRepository? bookingRepository;
-
-  /// Quién sabe el nombre y el teléfono del cliente.
-  final ProfileRepository? profileRepository;
 
   @override
   State<ScheduleSelectionScreen> createState() =>
@@ -78,10 +72,6 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   /// El comienzo elegido, en minutos desde medianoche. Nulo mientras no se
   /// haya tocado ninguna hora.
   int? _start;
-
-  /// Cierto mientras la cita se está guardando. Bloquea el botón: sin esto,
-  /// dos toques seguidos mandan dos reservas.
-  bool _guardando = false;
 
   @override
   void initState() {
@@ -134,7 +124,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('PASO 02 DE 02')),
+      appBar: AppBar(title: const Text('PASO 02 DE 03')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         children: [
@@ -156,8 +146,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
         total: widget.selection.totalPrice(ServiceCatalog.todos),
         date: _day?.date,
         start: _start,
-        guardando: _guardando,
-        onConfirm: _start == null || _guardando ? null : _confirmar,
+        onConfirm: _start == null ? null : _continuar,
       ),
     );
   }
@@ -242,72 +231,34 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     return 'NOCHE';
   }
 
-  Future<void> _confirmar() async {
+  /// Pasa al paso 3 con lo elegido. Aquí ya no se guarda nada: la cita se
+  /// reserva cuando el cliente dice quién es.
+  Future<void> _continuar() async {
     final booking = Booking(
       selection: widget.selection,
       date: _day!.date,
       startMinutes: _start!,
     );
-
-    setState(() => _guardando = true);
     final mensajero = ScaffoldMessenger.of(context);
-    final navegador = Navigator.of(context);
 
-    try {
-      // Sin un teléfono al que escribir, la cita no se puede confirmar ni
-      // recordar. Así que se piden los datos antes de guardar nada, y solo
-      // la primera vez: después quedan en el perfil.
-      final perfiles = widget.profileRepository ?? defaultProfileRepository();
-      var perfil = await perfiles.cargar();
-
-      if (!perfil.completo) {
-        if (!mounted) return;
-        final datos = await pedirDatosDeContacto(context, actual: perfil);
-        if (datos == null) {
-          // Cerró la hoja sin completar: no hay cita.
-          if (!mounted) return;
-          setState(() => _guardando = false);
-          return;
-        }
-        await perfiles.guardar(datos);
-        perfil = datos;
-      }
-
-      // Guardar primero y navegar después. Al revés, la pantalla diría
-      // "¡Cita confirmada!" antes de saber si lo está.
-      final repositorio = widget.bookingRepository ?? defaultBookingRepository();
-      await repositorio.reservar(booking);
-
-      if (!mounted) return;
-      // `pushAndRemoveUntil` en vez de `push`: la confirmación es terminal y
-      // los dos pasos salen de la pila. Si se pudiera volver atrás desde
-      // ella, lo único que se conseguiría es reservar dos veces.
-      navegador.pushAndRemoveUntil(
-        FlowPageRoute<void>(
-          builder: (_) => BookingConfirmedScreen(booking: booking),
+    final resultado = await Navigator.of(context).push<ResultadoIdentificacion>(
+      FlowPageRoute(
+        builder: (_) => IdentificationScreen(
+          booking: booking,
+          bookingRepository: widget.bookingRepository,
         ),
-        (route) => route.isFirst,
-      );
-    } on SlotTakenException {
-      if (!mounted) return;
-      setState(() => _guardando = false);
-      mensajero.showSnackBar(
-        const SnackBar(
-          content: Text('Alguien tomó esa hora hace un momento. Elige otra.'),
-        ),
-      );
-      // Recargar no es cortesía: la agenda que se está viendo ya es falsa, y
-      // al volver se verá ese hueco tachado.
-      await _cargar();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _guardando = false);
-      mensajero.showSnackBar(
-        const SnackBar(
-          content: Text('No pudimos guardar la cita. Intenta de nuevo.'),
-        ),
-      );
-    }
+      ),
+    );
+
+    if (resultado != ResultadoIdentificacion.horarioTomado || !mounted) return;
+    mensajero.showSnackBar(
+      const SnackBar(
+        content: Text('Alguien tomó esa hora hace un momento. Elige otra.'),
+      ),
+    );
+    // Recargar no es cortesía: la agenda que se estaba viendo ya es falsa, y
+    // al volver se verá ese hueco tachado.
+    await _cargar();
   }
 }
 
@@ -527,13 +478,12 @@ class _Aviso extends StatelessWidget {
   }
 }
 
-/// Barra fija con lo que se lleva elegido y el botón de reservar.
+/// Barra fija con lo que se lleva elegido y el botón para seguir.
 class _ConfirmBar extends StatelessWidget {
   const _ConfirmBar({
     required this.total,
     required this.date,
     required this.start,
-    required this.guardando,
     required this.onConfirm,
   });
 
@@ -543,9 +493,6 @@ class _ConfirmBar extends StatelessWidget {
   final DateTime? date;
 
   final int? start;
-
-  /// Mientras se guarda, el botón lo dice y no acepta más toques.
-  final bool guardando;
 
   final VoidCallback? onConfirm;
 
@@ -595,13 +542,7 @@ class _ConfirmBar extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: onConfirm,
-                child: Text(
-                  switch ((guardando, start)) {
-                    (true, _) => 'Reservando…',
-                    (false, null) => 'Elige una hora',
-                    (false, _) => 'Reservar cita',
-                  },
-                ),
+                child: Text(start == null ? 'Elige una hora' : 'Continuar'),
               ),
             ),
           ],

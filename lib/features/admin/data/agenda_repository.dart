@@ -68,15 +68,7 @@ class SupabaseAgendaRepository implements AgendaRepository {
 
   final SupabaseClient _db;
 
-  /// Lo que se pide de cada cita.
-  ///
-  /// PostgREST permite anidar: de la cita cuelgan el perfil, la mascota y
-  /// los servicios, y de cada servicio su nombre. Todo en una consulta, y
-  /// con el RLS aplicado en cada nivel — a quien no sea administradora
-  /// esto le devuelve una lista vacía.
-  static const String _campos = 'id, empieza, minutos, estado, total_cop, '
-      'notas_estilista, perfiles(nombre, telefono), mascotas(nombre), '
-      'cita_servicios(servicios(nombre))';
+  static const String _campos = agendaCampos;
 
   @override
   Future<List<AgendaEntry>> citasDe(DateTime dia) async {
@@ -90,7 +82,7 @@ class SupabaseAgendaRepository implements AgendaRepository {
         .lt('empieza', hasta.toUtc().toIso8601String())
         .order('empieza');
 
-    return [for (final fila in filas) _desdeFila(fila)];
+    return [for (final fila in filas) agendaEntryDesdeFila(fila)];
   }
 
   @override
@@ -100,30 +92,53 @@ class SupabaseAgendaRepository implements AgendaRepository {
         .update({'estado': estado.enBase}).eq('id', citaId);
   }
 
-  static AgendaEntry _desdeFila(Map<String, dynamic> fila) {
+}
+
+/// Lo que se pide de cada cita en cualquier consulta del panel.
+///
+/// PostgREST permite anidar: de la cita cuelgan el perfil, la mascota y los
+/// servicios, y de cada servicio su nombre. Todo en una consulta, y con el
+/// RLS aplicado en cada nivel.
+const String agendaCampos = 'id, cliente_id, mascota_id, empieza, '
+    'minutos, estado, total_cop, notas_estilista, '
+    'perfiles(nombre, telefono, eliminado_en), mascotas(nombre), '
+    'cita_servicios(servicios(id, nombre))';
+
+/// Cómo se llama en las citas un cliente que se eliminó desde el panel.
+const String clienteEliminado = 'Cliente eliminado';
+
+/// Convierte una fila de PostgREST en el modelo del panel.
+AgendaEntry agendaEntryDesdeFila(Map<String, dynamic> fila) {
     final perfil = fila['perfiles'] as Map<String, dynamic>?;
     final mascota = fila['mascotas'] as Map<String, dynamic>?;
     final servicios = (fila['cita_servicios'] as List<dynamic>? ?? const [])
         .map((e) => (e as Map<String, dynamic>)['servicios'])
         .whereType<Map<String, dynamic>>()
-        .map((s) => s['nombre'] as String)
         .toList();
 
     return AgendaEntry(
       id: fila['id'] as String,
+      clienteId: fila['cliente_id'] as String?,
       // Postgres manda el instante absoluto; la agenda se lee en el reloj
       // de la estética, que no tiene por qué ser el del dispositivo.
       empieza: enHoraEstetica(DateTime.parse(fila['empieza'] as String)),
       minutos: fila['minutos'] as int,
       estado: EstadoCita.desde(fila['estado'] as String),
       totalCop: fila['total_cop'] as int,
-      clienteNombre: perfil?['nombre'] as String?,
-      clienteTelefono: perfil?['telefono'] as String?,
+      // Un cliente eliminado no tiene nombre ni teléfono, pero su cita se
+      // queda en el historial: se dice quién era, no se deja un hueco.
+      clienteNombre: perfil?['eliminado_en'] != null
+          ? clienteEliminado
+          : perfil?['nombre'] as String?,
+      clienteTelefono: perfil?['eliminado_en'] != null
+          ? null
+          : perfil?['telefono'] as String?,
+      mascotaId: fila['mascota_id'] as String?,
       mascotaNombre: mascota?['nombre'] as String?,
-      servicios: servicios,
+      servicios: [for (final s in servicios) s['nombre'] as String],
+      servicioIds: [for (final s in servicios) s['id'] as String],
       notasEstilista: fila['notas_estilista'] as String?,
-    );
-  }
+  );
 }
 
 /// La agenda que usa la app: Postgres si hay credenciales, muestra si no.

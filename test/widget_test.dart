@@ -60,14 +60,15 @@ void main() {
   });
 
   testWidgets(
-      'tras el splash, la pantalla inicial muestra la promesa y los dos pasos',
+      'tras el splash, la pantalla inicial muestra la promesa y los tres pasos',
       (tester) async {
     await tester.pumpWidget(const PerroLookApp());
     await _pasarElSplash(tester);
 
-    expect(find.textContaining('dos pasos'), findsOneWidget);
+    expect(find.textContaining('tres pasos'), findsOneWidget);
     expect(find.text('Elige el servicio'), findsOneWidget);
     expect(find.text('Elige día y hora'), findsOneWidget);
+    expect(find.text('Dinos quién eres'), findsOneWidget);
     expect(find.widgetWithText(ElevatedButton, 'Reservar cita'), findsOneWidget);
   });
 
@@ -98,7 +99,7 @@ void main() {
     expect(_desplazamientoDe(tester, find.byType(HomeScreen)), isNegative);
 
     await tester.pumpAndSettle();
-    expect(find.text('PASO 01 DE 02'), findsOneWidget);
+    expect(find.text('PASO 01 DE 03'), findsOneWidget);
     expect(find.byType(HomeScreen), findsNothing);
   });
 

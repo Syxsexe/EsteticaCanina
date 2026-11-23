@@ -34,6 +34,10 @@ class AppBootstrap {
   /// la abandona y se entra de todos modos, que es justo para lo que estaba
   /// puesto.
   static Future<void> _conectarSupabase() async {
+    if (!AppConfig.hasSupabase || _conectado) {
+      debugPrint('Supabase NO inicializado. hasSupabase=${AppConfig.hasSupabase}, conectado=$_conectado');
+      return;
+    }
     if (!AppConfig.hasSupabase || _conectado) return;
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
@@ -42,6 +46,7 @@ class AppBootstrap {
       publishableKey: AppConfig.supabaseAnonKey,
     );
     _conectado = true;
+    debugPrint('Supabase conectado: ${AppConfig.supabaseUrl}');
   }
 
   /// `Supabase.initialize` protesta si se la llama dos veces, y en los tests

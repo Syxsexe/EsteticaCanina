@@ -26,7 +26,7 @@ class _ServiceSelectionScreenState extends State<ServiceSelectionScreen> {
     final catalogo = ServiceCatalog.todos;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('PASO 01 DE 02')),
+      appBar: AppBar(title: const Text('PASO 01 DE 03')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         children: [

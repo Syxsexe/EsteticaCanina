@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/navigation/flow_page_route.dart';
 import '../../core/theme/app_colors.dart';
-import 'agenda_screen.dart';
+import 'admin_shell_screen.dart';
 import 'data/admin_session.dart';
 
 /// Entrada de la estética.
@@ -61,7 +61,7 @@ class _AdminSignInScreenState extends State<AdminSignInScreen> {
       }
 
       navegador.pushReplacement(
-        FlowPageRoute<void>(builder: (_) => const AgendaScreen()),
+        FlowPageRoute<void>(builder: (_) => const AdminShellScreen()),
       );
     } on CredencialesInvalidas {
       if (!mounted) return;

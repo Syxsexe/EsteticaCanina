@@ -1,0 +1,1322 @@
+-- ===========================================================================
+-- Perro Look - recreacion completa de la base de datos
+-- ===========================================================================
+--
+-- Estado: esquema actual, incluidos los cambios "panel-estadisticas-admin" y
+-- "gestion-clientes-agenda-y-resumen" (con clientes por celular).
+--
+-- Como usarlo:
+--   1. Abre un proyecto de Supabase y entra al SQL Editor.
+--   2. Pega y ejecuta este archivo completo, de arriba abajo.
+--   3. Crea la cuenta administradora desde Authentication > Users > Add user:
+--        correo: juanfe20132@gmail.com
+--        contrasena: la que elijas (minimo 6 caracteres, no se guarda aqui)
+--      Confirma el correo si el proyecto exige confirmacion.
+--   4. Ejecuta el bloque final "Alta del administrador" para darle permisos.
+--
+-- La contrasena NO va en este archivo. Nunca publiques ni versiones la
+-- contrasena de una cuenta real.
+--
+-- Si necesitas borrar y reintentar en un proyecto de desarrollo, descomenta
+-- el bloque de limpieza que esta justo debajo. NO lo ejecutes con citas
+-- reales: no pide confirmacion y no hay deshacer.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- Limpieza opcional (solo desarrollo). Descomentar para reintentar.
+-- ---------------------------------------------------------------------------
+-- drop trigger if exists al_crear_usuario on auth.users;
+-- drop function if exists public.crear_perfil() cascade;
+-- drop function if exists public.calcular_fin_cita() cascade;
+-- drop function if exists public.horarios_ocupados(date, date) cascade;
+-- drop function if exists public.reservar_cita(uuid, timestamptz, text[]) cascade;
+-- drop function if exists public.mi_fidelidad() cascade;
+-- drop function if exists public.eliminar_cliente_admin(uuid) cascade;
+-- drop function if exists public.clientes_nuevos_en(date) cascade;
+-- drop function if exists public.reservar_cita_por_celular(text, text, text, timestamptz, text[]) cascade;
+-- drop table if exists public.notas_mascota cascade;
+-- drop table if exists public.observaciones cascade;
+-- drop table if exists public.referidos cascade;
+-- drop table if exists public.cita_servicios cascade;
+-- drop table if exists public.citas cascade;
+-- drop table if exists public.cierres cascade;
+-- drop table if exists public.horario_atencion cascade;
+-- drop table if exists public.servicios cascade;
+-- drop table if exists public.mascotas cascade;
+-- drop table if exists public.perfiles cascade;
+-- drop table if exists public.admins cascade;
+
+-- ===========================================================================
+-- 1. Esquema
+-- ===========================================================================
+
+create extension if not exists btree_gist;
+
+-- ---------------------------------------------------------------------------
+-- Quien reserva
+-- ---------------------------------------------------------------------------
+
+-- Un cliente. Nace con una cuenta (trigger `al_crear_usuario`, que usa el id
+-- de la cuenta) o sin ella, por celular (`reservar_cita_por_celular`, seccion
+-- 4c, con un id aleatorio). Por eso `id` no es clave foranea a auth.users.
+create table public.perfiles (
+  id uuid primary key default gen_random_uuid(),
+  nombre text,
+  -- El celular en E.164 (+573001112233). Es lo que identifica al cliente al
+  -- reservar.
+  telefono text,
+  creado_en timestamptz not null default now(),
+  -- Con valor, el cliente fue eliminado desde el panel: nombre y telefono
+  -- quedan nulos y sus citas pasadas se conservan (seccion 4d).
+  eliminado_en timestamptz
+);
+
+comment on table public.perfiles is
+  'Un cliente. Nace con una cuenta (trigger al_crear_usuario) o sin ella, por celular (reservar_cita_por_celular).';
+
+-- Para buscar por celular. No es unico: las cuentas anonimas de antes
+-- pudieron dejar el mismo celular repetido.
+create index perfiles_por_telefono on public.perfiles (telefono);
+
+-- El perfil nace con la cuenta: con OTP por telefono, auth.users.phone ya
+-- viene relleno y el nombre se pide despues, dentro de la app.
+create or replace function public.crear_perfil()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.perfiles (id, telefono)
+  values (new.id, new.phone)
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+create trigger al_crear_usuario
+  after insert on auth.users
+  for each row execute function public.crear_perfil();
+
+create table public.mascotas (
+  id uuid primary key default gen_random_uuid(),
+  dueno_id uuid not null references public.perfiles (id) on delete cascade,
+  nombre text not null,
+  raza text,
+  edad_anios int check (edad_anios between 0 and 30),
+  peso_kg numeric(4, 1) check (peso_kg > 0),
+  -- Ruta de la foto en el bucket privado `fotos-mascotas` (seccion 4e).
+  foto_path text,
+  -- Sin columna de notas: la nota del perro es interna de la estetica y
+  -- vive en `notas_mascota` (seccion 4b), que el tutor no puede leer.
+  creada_en timestamptz not null default now()
+);
+
+create index mascotas_por_dueno on public.mascotas (dueno_id);
+
+-- ---------------------------------------------------------------------------
+-- Que se ofrece y cuando
+-- ---------------------------------------------------------------------------
+
+-- El catalogo vive en la base y no en el codigo para que la duena pueda
+-- cambiar precios sin que nadie publique una version de la app.
+create table public.servicios (
+  id text primary key,
+  nombre text not null,
+  nota text not null,
+  precio_cop int not null check (precio_cop >= 0),
+  minutos int not null check (minutos > 0),
+  -- Falso: es un servicio principal, se elige uno. Cierto: es un extra, se
+  -- suman los que se quieran. Es la misma division de dos niveles del paso 1.
+  es_extra boolean not null default false,
+  activo boolean not null default true,
+  orden int not null default 0
+);
+
+-- Las franjas de atencion, una fila por tramo. Manana y tarde van separadas
+-- y el almuerzo es lo que queda en medio, igual que los TimeWindow de la app.
+create table public.horario_atencion (
+  id bigint generated always as identity primary key,
+  -- ISO: 1 = lunes ... 7 = domingo. Coincide con DateTime.weekday de Dart.
+  dia_semana int not null check (dia_semana between 1 and 7),
+  abre time not null,
+  cierra time not null,
+  check (abre < cierra),
+  -- Una sola franja por dia y hora de apertura. Ademas de evitar el
+  -- disparate de dos "mananas" el mismo dia, le da al seed algo contra lo
+  -- que hacer `on conflict`, para poder correrlo las veces que haga falta.
+  unique (dia_semana, abre)
+);
+
+-- Festivos, vacaciones y cierres puntuales. Pisan al horario.
+create table public.cierres (
+  fecha date primary key,
+  motivo text
+);
+
+-- ---------------------------------------------------------------------------
+-- Las citas
+-- ---------------------------------------------------------------------------
+
+create table public.citas (
+  id uuid primary key default gen_random_uuid(),
+  cliente_id uuid not null references public.perfiles (id) on delete restrict,
+  mascota_id uuid references public.mascotas (id) on delete set null,
+  empieza timestamptz not null,
+  minutos int not null check (minutos > 0),
+  -- Lo calcula el disparador `citas_calcular_fin`, no una columna generada.
+  -- En Postgres `timestamptz + interval` es STABLE y no IMMUTABLE: en cuanto
+  -- el intervalo puede llevar dias o meses, el resultado depende de la zona
+  -- horaria de la sesion, y el operador se marca por su peor caso aunque
+  -- aqui solo se le pasen minutos. Una columna generada exige inmutabilidad;
+  -- un disparador no.
+  termina timestamptz not null,
+  estado text not null default 'reservada'
+    check (estado in ('reservada', 'cumplida', 'cancelada', 'no_asistio')),
+  -- Congelado al reservar. Si manana sube el precio del bano, esta cita
+  -- sigue costando lo que costaba.
+  total_cop int not null check (total_cop >= 0),
+  creada_en timestamptz not null default now()
+);
+
+create or replace function public.calcular_fin_cita()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.termina := new.empieza + make_interval(mins => new.minutos);
+  return new;
+end;
+$$;
+
+-- Solo cuando cambia algo que afecte al calculo: marcar una cita como
+-- cumplida no tiene por que recalcular nada.
+create trigger citas_calcular_fin
+  before insert or update of empieza, minutos on public.citas
+  for each row execute function public.calcular_fin_cita();
+
+-- La regla que el cliente no puede saltarse.
+--
+-- La app ya comprueba solapamientos en Dart, pero eso corre en el telefono:
+-- dos personas con la pantalla abierta ven el mismo hueco libre y las dos
+-- pulsan. Esta restriccion rechaza la segunda de forma atomica, que es el
+-- unico sitio donde la regla se sostiene de verdad.
+--
+-- Si algun dia hay dos estilistas, se anade `estilista_id with =` aqui.
+alter table public.citas add constraint sin_solapes
+  exclude using gist (tstzrange(empieza, termina) with &&)
+  where (estado in ('reservada', 'cumplida'));
+
+create index citas_por_cliente on public.citas (cliente_id);
+create index citas_por_fecha on public.citas (empieza);
+
+create table public.cita_servicios (
+  cita_id uuid not null references public.citas (id) on delete cascade,
+  servicio_id text not null references public.servicios (id),
+  -- Tambien congelados: el detalle de la factura no puede cambiar porque
+  -- alguien edite el catalogo meses despues.
+  precio_cop int not null check (precio_cop >= 0),
+  minutos int not null check (minutos >= 0),
+  primary key (cita_id, servicio_id)
+);
+
+-- ---------------------------------------------------------------------------
+-- Fidelidad
+-- ---------------------------------------------------------------------------
+
+-- Las visitas acumuladas NO se guardan en un contador: se cuentan sobre las
+-- citas cumplidas. Un contador se desincroniza con cada cancelacion o
+-- correccion manual; una cuenta sobre la tabla real nunca miente.
+--
+-- Los referidos si necesitan tabla, porque no se deducen de nada.
+create table public.referidos (
+  id uuid primary key default gen_random_uuid(),
+  quien_refiere uuid not null references public.perfiles (id) on delete cascade,
+  -- Cada persona puede ser referida una sola vez, por alguien distinto.
+  referido uuid not null unique references public.perfiles (id) on delete cascade,
+  creado_en timestamptz not null default now(),
+  check (quien_refiere <> referido)
+);
+
+create index referidos_por_quien on public.referidos (quien_refiere);
+
+-- ===========================================================================
+-- 2. Politicas de acceso (RLS)
+-- ===========================================================================
+--
+-- Punto de partida: todo cerrado. Cada tabla se abre solo a lo que la app
+-- necesita de verdad, y las citas no se abren en absoluto para escritura:
+-- reservar pasa por la funcion `reservar_cita` de la seccion siguiente.
+
+alter table public.perfiles         enable row level security;
+alter table public.mascotas         enable row level security;
+alter table public.servicios        enable row level security;
+alter table public.horario_atencion enable row level security;
+alter table public.cierres          enable row level security;
+alter table public.citas            enable row level security;
+alter table public.cita_servicios   enable row level security;
+alter table public.referidos        enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Publico: lo que se puede ver sin cuenta
+-- ---------------------------------------------------------------------------
+--
+-- Navegar el catalogo y el horario no exige identificarse. Es deliberado:
+-- con OTP por telefono cada registro cuesta un SMS, asi que nadie deberia
+-- tener que crear cuenta para mirar que hay y cuando abren.
+
+create policy "el catalogo activo es publico"
+  on public.servicios for select
+  to anon, authenticated
+  using (activo);
+
+create policy "el horario es publico"
+  on public.horario_atencion for select
+  to anon, authenticated
+  using (true);
+
+create policy "los cierres son publicos"
+  on public.cierres for select
+  to anon, authenticated
+  using (true);
+
+-- Ojo: las horas ocupadas NO se exponen aqui. Una politica sobre `citas`
+-- que dejara verlas ensenaria tambien de quien son. Eso se resuelve con la
+-- funcion `horarios_ocupados`, que proyecta solo dos columnas de tiempo.
+
+-- ---------------------------------------------------------------------------
+-- Privado: cada quien lo suyo
+-- ---------------------------------------------------------------------------
+
+create policy "cada quien ve su perfil"
+  on public.perfiles for select
+  to authenticated
+  using (id = (select auth.uid()));
+
+create policy "cada quien edita su perfil"
+  on public.perfiles for update
+  to authenticated
+  using (id = (select auth.uid()))
+  with check (id = (select auth.uid()));
+
+-- El perfil lo crea el trigger `al_crear_usuario`, no el cliente: no hay
+-- politica de insert.
+
+create policy "cada quien ve sus mascotas"
+  on public.mascotas for select
+  to authenticated
+  using (dueno_id = (select auth.uid()));
+
+create policy "cada quien registra sus mascotas"
+  on public.mascotas for insert
+  to authenticated
+  with check (dueno_id = (select auth.uid()));
+
+create policy "cada quien edita sus mascotas"
+  on public.mascotas for update
+  to authenticated
+  using (dueno_id = (select auth.uid()))
+  with check (dueno_id = (select auth.uid()));
+
+create policy "cada quien borra sus mascotas"
+  on public.mascotas for delete
+  to authenticated
+  using (dueno_id = (select auth.uid()));
+
+create policy "cada quien ve sus citas"
+  on public.citas for select
+  to authenticated
+  using (cliente_id = (select auth.uid()));
+
+-- Cancelar es lo unico que el cliente escribe directamente sobre una cita.
+-- El `with check` impide que use este camino para moverla de hora y saltarse
+-- las validaciones de `reservar_cita`.
+create policy "cada quien cancela sus citas"
+  on public.citas for update
+  to authenticated
+  using (cliente_id = (select auth.uid()) and estado = 'reservada')
+  with check (cliente_id = (select auth.uid()) and estado = 'cancelada');
+
+create policy "cada quien ve el detalle de sus citas"
+  on public.cita_servicios for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.citas c
+      where c.id = cita_servicios.cita_id
+        and c.cliente_id = (select auth.uid())
+    )
+  );
+
+create policy "cada quien ve a quien refirio"
+  on public.referidos for select
+  to authenticated
+  using (
+    quien_refiere = (select auth.uid()) or referido = (select auth.uid())
+  );
+
+-- No hay politica de insert sobre `referidos`: un referido se registra al
+-- canjear un codigo, y eso sera una funcion con sus propias comprobaciones.
+-- Dejarlo abierto seria dejar que cualquiera se autoasignara referidos.
+
+-- ===========================================================================
+-- 3. Funciones que llama la app
+-- ===========================================================================
+--
+-- Son tres: ver que horas estan ocupadas (sin cuenta), reservar (con cuenta)
+-- y consultar la fidelidad.
+
+-- ---------------------------------------------------------------------------
+-- Horas ocupadas, sin revelar de quien son
+-- ---------------------------------------------------------------------------
+--
+-- El cliente necesita saber que el miercoles a las 10:00 no hay sitio, pero
+-- no quien lo tiene, con que perro ni con que telefono. Como la funcion es
+-- `security definer`, se salta las politicas de `citas`; y como solo
+-- proyecta dos columnas de tiempo, no queda nada que filtrar.
+--
+-- Deliberadamente NO es una vista: en Supabase una vista corre como su
+-- dueno salvo que lleve `security_invoker = true`, y esa ambiguedad ha
+-- causado filtraciones reales. Una funcion se audita de un vistazo.
+create or replace function public.horarios_ocupados(desde date, hasta date)
+returns table (empieza timestamptz, termina timestamptz)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select c.empieza, c.termina
+  from public.citas c
+  where c.estado in ('reservada', 'cumplida')
+    and c.empieza >= (desde::timestamp at time zone 'America/Bogota')
+    and c.empieza < ((hasta + 1)::timestamp at time zone 'America/Bogota');
+$$;
+
+revoke all on function public.horarios_ocupados(date, date) from public;
+grant execute on function public.horarios_ocupados(date, date)
+  to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Reservar
+-- ---------------------------------------------------------------------------
+--
+-- Toda la reserva en una llamada y una transaccion: valida, calcula el
+-- precio y escribe la cita con su detalle.
+--
+-- La validacion y la escritura viven en `crear_cita_para`, que recibe el
+-- cliente ya resuelto. Reservar como cliente y reservar desde el panel son
+-- dos envoltorios sobre la misma funcion.
+--
+-- El precio y la duracion salen de la tabla `servicios`, nunca de lo que
+-- mande el cliente. Si el total viajara desde el telefono, cualquiera
+-- podria reservar un corte de raza por mil pesos.
+create or replace function public.crear_cita_para(
+  p_cliente_id uuid,
+  p_mascota_id uuid,
+  p_empieza timestamptz,
+  p_servicios text[]
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pedidos int := coalesce(array_length(p_servicios, 1), 0);
+  v_encontrados int;
+  v_principales int;
+  v_minutos int;
+  v_total int;
+  v_local timestamp;
+  v_cita uuid;
+begin
+  if p_cliente_id is null or not exists (
+    select 1 from public.perfiles where id = p_cliente_id
+  ) then
+    raise exception 'Ese cliente no existe'
+      using errcode = '42501';
+  end if;
+
+  if p_mascota_id is not null and not exists (
+    select 1 from public.mascotas
+    where id = p_mascota_id and dueno_id = p_cliente_id
+  ) then
+    raise exception 'Esa mascota no está a nombre del cliente'
+      using errcode = '42501';
+  end if;
+
+  select count(*),
+         count(*) filter (where not es_extra),
+         coalesce(sum(minutos), 0),
+         coalesce(sum(precio_cop), 0)
+    into v_encontrados, v_principales, v_minutos, v_total
+  from public.servicios
+  where id = any (p_servicios) and activo;
+
+  if v_encontrados <> v_pedidos then
+    raise exception 'Alguno de esos servicios ya no está disponible';
+  end if;
+
+  -- La misma regla de dos niveles del paso 1: uno principal, los extras que
+  -- se quieran encima.
+  if v_principales <> 1 then
+    raise exception 'La cita necesita exactamente un servicio principal';
+  end if;
+
+  -- El horario se razona en hora de Bogota. Colombia no tiene horario de
+  -- verano, asi que la conversion es estable todo el ano.
+  v_local := p_empieza at time zone 'America/Bogota';
+
+  if exists (select 1 from public.cierres where fecha = v_local::date) then
+    raise exception 'Ese día la estética está cerrada';
+  end if;
+
+  -- La cita tiene que caber entera dentro de una sola franja: ni pisar el
+  -- almuerzo ni terminar despues de cerrar.
+  if not exists (
+    select 1 from public.horario_atencion h
+    where h.dia_semana = extract(isodow from v_local)
+      and v_local::time >= h.abre
+      and (v_local + make_interval(mins => v_minutos))::time <= h.cierra
+  ) then
+    raise exception 'A esa hora la cita no cabe en el horario de atención';
+  end if;
+
+  insert into public.citas (cliente_id, mascota_id, empieza, minutos, total_cop)
+  values (p_cliente_id, p_mascota_id, p_empieza, v_minutos, v_total)
+  returning id into v_cita;
+
+  insert into public.cita_servicios (cita_id, servicio_id, precio_cop, minutos)
+  select v_cita, s.id, s.precio_cop, s.minutos
+  from public.servicios s
+  where s.id = any (p_servicios);
+
+  return v_cita;
+end;
+$$;
+
+revoke all on function public.crear_cita_para(uuid, uuid, timestamptz, text[])
+  from public;
+-- Supabase da `execute` a `anon` y `authenticated` por separado en cada
+-- funcion nueva; quitarselo a `public` no basta. Sin esto, cualquiera podria
+-- llamar a esta funcion interna y reservar a nombre de otro cliente sin
+-- pasar por `es_admin()`. Las reservas siguen funcionando porque
+-- `reservar_cita` y `reservar_cita_admin` son `security definer`.
+revoke execute on function public.crear_cita_para(uuid, uuid, timestamptz, text[])
+  from anon, authenticated;
+
+-- La reserva del cliente, que toma su propio id de la sesion.
+create or replace function public.reservar_cita(
+  p_mascota_id uuid,
+  p_empieza timestamptz,
+  p_servicios text[]
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_cliente uuid := (select auth.uid());
+begin
+  if v_cliente is null then
+    raise exception 'Hay que iniciar sesión para reservar'
+      using errcode = '28000';
+  end if;
+
+  return public.crear_cita_para(
+    v_cliente, p_mascota_id, p_empieza, p_servicios
+  );
+exception
+  -- Lo lanza la restriccion `sin_solapes`: alguien reservo ese hueco entre
+  -- que la pantalla se dibujo y el cliente pulso.
+  --
+  -- Se vuelve a lanzar con el MISMO codigo, `exclusion_violation` (23P01),
+  -- y no con el generico P0001. Asi el cliente distingue este caso -que
+  -- tiene su propia respuesta: recargar la agenda y pedir otra hora- de
+  -- cualquier otro fallo, sin tener que mirar el texto del mensaje, que
+  -- cambia en cuanto alguien corrige una tilde.
+  when exclusion_violation then
+    raise exception 'Ese horario lo acaban de tomar, elige otro'
+      using errcode = 'exclusion_violation';
+end;
+$$;
+
+revoke all on function public.reservar_cita(uuid, timestamptz, text[]) from public;
+grant execute on function public.reservar_cita(uuid, timestamptz, text[])
+  to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Fidelidad
+-- ---------------------------------------------------------------------------
+--
+-- Esta si es `security invoker`: corre con los permisos de quien llama y se
+-- apoya en la politica "cada quien ve sus citas". No hace falta saltarse
+-- nada, asi que no se salta nada.
+create or replace function public.mi_fidelidad()
+returns table (visitas int, faltan_para_gratis int, referidos int)
+language sql
+security invoker
+stable
+as $$
+  with cumplidas as (
+    select count(*)::int as n
+    from public.citas
+    where cliente_id = (select auth.uid()) and estado = 'cumplida'
+  )
+  select
+    c.n,
+    8 - (c.n % 8),
+    (select count(*)::int from public.referidos
+      where quien_refiere = (select auth.uid()))
+  from cumplidas c;
+$$;
+
+grant execute on function public.mi_fidelidad() to authenticated;
+
+-- ===========================================================================
+-- 4. Rol de administracion
+-- ===========================================================================
+--
+-- Hasta aqui el esquema solo distinguia dos: quien no ha entrado (ve el
+-- catalogo y las horas ocupadas, sin saber de quien son) y quien ha entrado
+-- (ve lo suyo). La duena necesita ver todo, y con su cuenta de cliente hoy
+-- veria exactamente lo mismo que cualquier otro.
+
+-- ---------------------------------------------------------------------------
+-- Quien manda
+-- ---------------------------------------------------------------------------
+
+-- Una tabla de uid y nada mas. No lleva el rol como columna en `perfiles`
+-- a proposito: una politica sobre `perfiles` que consulte `perfiles` entra
+-- en recursion, y hay que desactivarla con rodeos que nadie recuerda tres
+-- meses despues.
+create table public.admins (
+  id uuid primary key references auth.users (id) on delete cascade,
+  anotacion text,
+  creado_en timestamptz not null default now()
+);
+
+-- RLS activo y CERO politicas: desde el cliente esta tabla no se lee ni se
+-- escribe, pase lo que pase. Se administra desde el panel de Supabase, que
+-- es justo donde debe estar la decision de quien manda.
+alter table public.admins enable row level security;
+
+-- `security definer` para que se salte el RLS de `admins` -si no, la
+-- funcion no podria leer la tabla que acaba de cerrarse-. `stable` para que
+-- Postgres la evalue una vez por consulta y no una vez por fila.
+create or replace function public.es_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.admins a where a.id = (select auth.uid())
+  );
+$$;
+
+grant execute on function public.es_admin() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Lo que la estetica ve
+-- ---------------------------------------------------------------------------
+--
+-- Las politicas se suman con OR, asi que estas conviven con las de cliente
+-- sin tocarlas: un cliente sigue viendo lo suyo, y quien ademas este en
+-- `admins` lo ve todo.
+
+create policy "la estetica ve todas las citas"
+  on public.citas for select
+  to authenticated
+  using (es_admin());
+
+-- Marcar cumplida o no asistio, y escribir la nota. Sin esto, ninguna cita
+-- avanza nunca de `reservada`, y entonces la fidelidad y las analiticas se
+-- quedan en cero para siempre.
+create policy "la estetica actualiza las citas"
+  on public.citas for update
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+create policy "la estetica ve a los clientes"
+  on public.perfiles for select
+  to authenticated
+  using (es_admin());
+
+create policy "la estetica ve las mascotas"
+  on public.mascotas for select
+  to authenticated
+  using (es_admin());
+
+create policy "la estetica ve el detalle de las citas"
+  on public.cita_servicios for select
+  to authenticated
+  using (es_admin());
+
+-- ---------------------------------------------------------------------------
+-- Lo que la estetica administra
+-- ---------------------------------------------------------------------------
+--
+-- `for all` incluye el select, asi que la duena ve tambien los servicios
+-- desactivados, que la politica publica esconde.
+
+create policy "la estetica administra el catalogo"
+  on public.servicios for all
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+create policy "la estetica administra el horario"
+  on public.horario_atencion for all
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+create policy "la estetica administra los cierres"
+  on public.cierres for all
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+-- ---------------------------------------------------------------------------
+-- La nota de la estilista
+-- ---------------------------------------------------------------------------
+--
+-- Del expediente del poster: "se incomoda con el secador cerca de las
+-- orejas, secar con calma". Va en la cita y no en la mascota porque es lo
+-- que paso ese dia; lo permanente del perro vive en `notas_mascota`.
+alter table public.citas add column notas_estilista text;
+
+-- ---------------------------------------------------------------------------
+-- Observaciones privadas del cliente
+-- ---------------------------------------------------------------------------
+--
+-- Van en su propia tabla porque son sobre el tutor, no sobre un perro, y
+-- una nota de la estetica sobre el tutor no debe salir de aqui.
+--
+-- No hay politica para clientes: no las leen ni las escriben. El autor se
+-- fija a quien las crea para que quede registro de quien las anoto.
+
+create table public.observaciones (
+  id uuid primary key default gen_random_uuid(),
+  cliente_id uuid not null references public.perfiles (id) on delete cascade,
+  autor_id uuid not null references auth.users (id) on delete cascade,
+  texto text not null check (length(btrim(texto)) > 0),
+  creada_en timestamptz not null default now()
+);
+
+create index observaciones_por_cliente on public.observaciones (cliente_id);
+
+alter table public.observaciones enable row level security;
+
+create policy "la estética ve las observaciones"
+  on public.observaciones for select
+  to authenticated
+  using (es_admin());
+
+create policy "la estética crea observaciones"
+  on public.observaciones for insert
+  to authenticated
+  with check (es_admin() and autor_id = (select auth.uid()));
+
+create policy "la estética edita observaciones"
+  on public.observaciones for update
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+create policy "la estética borra observaciones"
+  on public.observaciones for delete
+  to authenticated
+  using (es_admin());
+
+-- ---------------------------------------------------------------------------
+-- Citas creadas y editadas desde el panel
+-- ---------------------------------------------------------------------------
+--
+-- El cliente lo elige la estetica, no la sesion. El resto de la validacion
+-- la hace `crear_cita_para`, la misma que usa el cliente.
+
+create or replace function public.reservar_cita_admin(
+  p_cliente_id uuid,
+  p_mascota_id uuid,
+  p_empieza timestamptz,
+  p_servicios text[]
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.es_admin() then
+    raise exception 'Solo la estética puede crear citas para un cliente'
+      using errcode = '42501';
+  end if;
+
+  return public.crear_cita_para(
+    p_cliente_id, p_mascota_id, p_empieza, p_servicios
+  );
+exception
+  when exclusion_violation then
+    raise exception 'Ese horario ya está ocupado, elige otro'
+      using errcode = 'exclusion_violation';
+end;
+$$;
+
+revoke all on function public.reservar_cita_admin(uuid, uuid, timestamptz, text[])
+  from public;
+grant execute on function public.reservar_cita_admin(uuid, uuid, timestamptz, text[])
+  to authenticated;
+
+create or replace function public.editar_cita_admin(
+  p_cita_id uuid,
+  p_empieza timestamptz,
+  p_mascota_id uuid,
+  p_servicios text[],
+  p_estado text,
+  p_notas text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_cliente uuid;
+  v_pedidos int := coalesce(array_length(p_servicios, 1), 0);
+  v_encontrados int;
+  v_principales int;
+  v_minutos int;
+  v_total int;
+  v_local timestamp;
+begin
+  if not public.es_admin() then
+    raise exception 'Solo la estética puede editar citas'
+      using errcode = '42501';
+  end if;
+
+  select cliente_id into v_cliente
+  from public.citas where id = p_cita_id;
+
+  if v_cliente is null then
+    raise exception 'Esa cita no existe'
+      using errcode = '42501';
+  end if;
+
+  if p_estado not in ('reservada', 'cumplida', 'cancelada', 'no_asistio') then
+    raise exception 'Estado de cita desconocido: %', p_estado;
+  end if;
+
+  if p_mascota_id is not null and not exists (
+    select 1 from public.mascotas
+    where id = p_mascota_id and dueno_id = v_cliente
+  ) then
+    raise exception 'Esa mascota no está a nombre del cliente'
+      using errcode = '42501';
+  end if;
+
+  select count(*),
+         count(*) filter (where not es_extra),
+         coalesce(sum(minutos), 0),
+         coalesce(sum(precio_cop), 0)
+    into v_encontrados, v_principales, v_minutos, v_total
+  from public.servicios
+  where id = any (p_servicios) and activo;
+
+  if v_encontrados <> v_pedidos then
+    raise exception 'Alguno de esos servicios ya no está disponible';
+  end if;
+
+  if v_principales <> 1 then
+    raise exception 'La cita necesita exactamente un servicio principal';
+  end if;
+
+  v_local := p_empieza at time zone 'America/Bogota';
+
+  if exists (select 1 from public.cierres where fecha = v_local::date) then
+    raise exception 'Ese día la estética está cerrada';
+  end if;
+
+  if not exists (
+    select 1 from public.horario_atencion h
+    where h.dia_semana = extract(isodow from v_local)
+      and v_local::time >= h.abre
+      and (v_local + make_interval(mins => v_minutos))::time <= h.cierra
+  ) then
+    raise exception 'A esa hora la cita no cabe en el horario de atención';
+  end if;
+
+  update public.citas set
+    empieza = p_empieza,
+    mascota_id = p_mascota_id,
+    minutos = v_minutos,
+    total_cop = v_total,
+    estado = p_estado,
+    notas_estilista = p_notas
+  where id = p_cita_id;
+
+  delete from public.cita_servicios where cita_id = p_cita_id;
+
+  insert into public.cita_servicios (cita_id, servicio_id, precio_cop, minutos)
+  select p_cita_id, s.id, s.precio_cop, s.minutos
+  from public.servicios s
+  where s.id = any (p_servicios);
+exception
+  when exclusion_violation then
+    raise exception 'Ese horario ya está ocupado, elige otro'
+      using errcode = 'exclusion_violation';
+end;
+$$;
+
+revoke all on function public.editar_cita_admin(
+  uuid, timestamptz, uuid, text[], text, text
+) from public;
+grant execute on function public.editar_cita_admin(
+  uuid, timestamptz, uuid, text[], text, text
+) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Consultas del panel
+-- ---------------------------------------------------------------------------
+--
+-- Con `security definer` la estetica ve lo mismo que le dejan las politicas,
+-- pero sin tener que leer `admins` desde pantallas. El directorio ya sale
+-- ordenado y sin cuentas administradoras.
+
+create or replace function public.directorio_clientes()
+returns table (id uuid, nombre text, telefono text, citas bigint)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select p.id,
+         p.nombre,
+         p.telefono,
+         count(c.id) as citas
+  from public.perfiles p
+  left join public.citas c on c.cliente_id = p.id
+  where public.es_admin()
+    and p.eliminado_en is null
+    and not exists (select 1 from public.admins a where a.id = p.id)
+  group by p.id, p.nombre, p.telefono
+  order by coalesce(nullif(btrim(p.nombre), ''), 'zzzz'), p.telefono;
+$$;
+
+revoke all on function public.directorio_clientes() from public;
+grant execute on function public.directorio_clientes() to authenticated;
+
+create or replace function public.clientes_nuevos_mes()
+returns int
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select count(*)::int
+  from public.perfiles p
+  where public.es_admin()
+    and not exists (select 1 from public.admins a where a.id = p.id)
+    and p.creado_en >= (
+      date_trunc('month', now() at time zone 'America/Bogota')
+        at time zone 'America/Bogota'
+    );
+$$;
+
+revoke all on function public.clientes_nuevos_mes() from public;
+grant execute on function public.clientes_nuevos_mes() to authenticated;
+
+-- Clientes nuevos de un mes cualquiera, para revisar meses pasados en el
+-- Resumen. Otro nombre y no sobrecarga: PostgREST resuelve mal las
+-- sobrecargas.
+create or replace function public.clientes_nuevos_en(p_mes date)
+returns int
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  -- El mes se corta en el reloj de Bogotá: un cliente que se registró el 31
+  -- de octubre a las 20:00 de Bogotá es de octubre, aunque en UTC ya sea
+  -- 1 de noviembre. Como en `clientes_nuevos_mes`, quien no sea admin
+  -- recibe cero.
+  select count(*)::int
+  from public.perfiles p
+  where public.es_admin()
+    and not exists (select 1 from public.admins a where a.id = p.id)
+    -- `p_mes::timestamp` antes de truncar: un `date` suelto se convertiría
+    -- a timestamptz con la zona de la sesión, y el corte dependería de ella.
+    and p.creado_en >= (date_trunc('month', p_mes::timestamp)
+                          at time zone 'America/Bogota')
+    and p.creado_en < ((date_trunc('month', p_mes::timestamp) + interval '1 month')
+                          at time zone 'America/Bogota');
+$$;
+
+-- Supabase da `execute` a `anon` y `authenticated` por separado en cada
+-- función nueva: hay que quitárselo a `anon` de forma explícita.
+revoke all on function public.clientes_nuevos_en(date) from public, anon;
+grant execute on function public.clientes_nuevos_en(date) to authenticated;
+
+-- ===========================================================================
+-- 4b. Gestion de clientes desde el panel
+-- ===========================================================================
+--
+-- La estetica corrige el contacto de un cliente con cuenta, registra y edita
+-- sus mascotas y les deja notas internas. No crea clientes: un perfil sigue
+-- naciendo con su usuario de auth.users.
+--
+-- No hay `delete` para la estetica ni sobre perfiles ni sobre mascotas. Una
+-- mascota borrada dejaria sus citas pasadas sin perro y el historial
+-- perderia informacion.
+
+create policy "la estetica edita a los clientes"
+  on public.perfiles for update
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+create policy "la estetica registra mascotas"
+  on public.mascotas for insert
+  to authenticated
+  with check (es_admin());
+
+create policy "la estetica edita mascotas"
+  on public.mascotas for update
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+-- Una nota por mascota que solo la estetica lee y escribe. No puede vivir en
+-- `mascotas`: el tutor ve sus mascotas con todas las columnas y la RLS es por
+-- fila, no por columna.
+create table public.notas_mascota (
+  mascota_id uuid primary key references public.mascotas (id) on delete cascade,
+  texto text not null,
+  -- Nulo en notas heredadas sin autor conocido.
+  autor_id uuid references auth.users (id) on delete set null,
+  actualizada_en timestamptz not null default now()
+);
+
+comment on table public.notas_mascota is
+  'Nota interna de la estetica sobre una mascota. El tutor no la ve.';
+
+alter table public.notas_mascota enable row level security;
+
+-- Sin politicas para clientes. Sin `delete`: vaciar el texto quita la nota.
+create policy "la estetica ve las notas de mascota"
+  on public.notas_mascota for select
+  to authenticated
+  using (es_admin());
+
+create policy "la estetica crea notas de mascota"
+  on public.notas_mascota for insert
+  to authenticated
+  with check (es_admin());
+
+create policy "la estetica edita notas de mascota"
+  on public.notas_mascota for update
+  to authenticated
+  using (es_admin())
+  with check (es_admin());
+
+-- ===========================================================================
+-- 4c. Reservar por celular
+-- ===========================================================================
+--
+-- El cliente se identifica por su celular, no por la sesion del equipo. La
+-- usan la app de clientes (paso 3) y el "Cliente nuevo" del panel. Busca o
+-- crea el perfil y la mascota y crea la cita en una sola transaccion; un
+-- horario tomado no deja clientes huerfanos. No renombra perfiles existentes.
+
+create or replace function public.reservar_cita_por_celular(
+  p_nombre text,
+  p_telefono text,
+  p_mascota_nombre text,
+  p_empieza timestamptz,
+  p_servicios text[]
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_nombre text := btrim(coalesce(p_nombre, ''));
+  v_telefono text := btrim(coalesce(p_telefono, ''));
+  v_mascota_nombre text := btrim(coalesce(p_mascota_nombre, ''));
+  v_cliente uuid;
+  v_mascota uuid;
+begin
+  -- Cualquiera puede llamarla, con o sin sesión: la validación no puede
+  -- depender de que la app ya la haya hecho.
+  if v_telefono !~ '^\+573[0-9]{9}$' then
+    raise exception 'Escribe un celular colombiano'
+      using errcode = '22023';
+  end if;
+
+  if v_nombre = '' or length(v_nombre) > 80 then
+    raise exception 'Escribe el nombre del dueño'
+      using errcode = '22023';
+  end if;
+
+  if v_mascota_nombre = '' or length(v_mascota_nombre) > 40 then
+    raise exception 'Escribe el nombre de la mascota'
+      using errcode = '22023';
+  end if;
+
+  -- El cliente con ese celular. Si hay varios, que dejaron las cuentas
+  -- anónimas de antes, el más antiguo. Las cuentas administradoras no
+  -- cuentan: su celular no convierte a nadie en la estética.
+  select p.id into v_cliente
+  from public.perfiles p
+  where p.telefono = v_telefono
+    and not exists (select 1 from public.admins a where a.id = p.id)
+  order by p.creado_en
+  limit 1;
+
+  -- Si ya existe, su nombre NO se toca: si no, cualquiera que supiera un
+  -- celular podría renombrar a ese cliente.
+  if v_cliente is null then
+    insert into public.perfiles (nombre, telefono)
+    values (v_nombre, v_telefono)
+    returning id into v_cliente;
+  end if;
+
+  -- La mascota del cliente con ese nombre, sin mirar mayúsculas ni espacios.
+  select m.id into v_mascota
+  from public.mascotas m
+  where m.dueno_id = v_cliente
+    and lower(btrim(m.nombre)) = lower(v_mascota_nombre)
+  order by m.creada_en
+  limit 1;
+
+  if v_mascota is null then
+    insert into public.mascotas (dueno_id, nombre)
+    values (v_cliente, v_mascota_nombre)
+    returning id into v_mascota;
+  end if;
+
+  -- Las reglas de servicios, horario, cierres y precio siguen en un solo
+  -- sitio. `crear_cita_para` está cerrada a las llamadas directas, pero esta
+  -- función corre con los permisos de su dueño.
+  return public.crear_cita_para(
+    v_cliente, v_mascota, p_empieza, p_servicios
+  );
+exception
+  -- Al salir por aquí se deshace todo el bloque, perfil y mascota incluidos:
+  -- un horario tomado no deja clientes huérfanos.
+  when exclusion_violation then
+    raise exception 'Ese horario lo acaban de tomar, elige otro'
+      using errcode = 'exclusion_violation';
+end;
+$$;
+
+-- Supabase da `execute` a `anon` y `authenticated` por separado en cada
+-- función nueva. Aquí se quiere justo eso, pero se deja escrito para que no
+-- dependa de un valor por defecto.
+revoke all on function public.reservar_cita_por_celular(
+  text, text, text, timestamptz, text[]
+) from public;
+grant execute on function public.reservar_cita_por_celular(
+  text, text, text, timestamptz, text[]
+) to anon, authenticated;
+
+-- ===========================================================================
+-- 4d. Eliminar un cliente (anonimizar)
+-- ===========================================================================
+--
+-- El perfil no se borra: sus citas lo referencian y los ingresos pasados
+-- dependen de ellas. Se cancelan sus citas futuras, se limpian las notas de
+-- la estilista, se borran observaciones y mascotas y se vacian nombre y
+-- telefono. `directorio_clientes` ya no lo lista.
+
+create or replace function public.eliminar_cliente_admin(p_cliente_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.es_admin() then
+    raise exception 'Solo la estética puede eliminar clientes'
+      using errcode = '42501';
+  end if;
+
+  if exists (select 1 from public.admins where id = p_cliente_id) then
+    raise exception 'Una cuenta administradora no se elimina desde aquí'
+      using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1 from public.perfiles
+    where id = p_cliente_id and eliminado_en is null
+  ) then
+    raise exception 'Ese cliente no existe o ya fue eliminado'
+      using errcode = 'P0002';
+  end if;
+
+  -- Las futuras que seguían en pie se cancelan. `sin_solapes` solo mira las
+  -- reservadas y cumplidas, así que su horario queda libre para otros.
+  update public.citas
+  set estado = 'cancelada'
+  where cliente_id = p_cliente_id
+    and estado = 'reservada'
+    and empieza > now();
+
+  -- La nota de la estilista puede tener datos personales. El importe, los
+  -- servicios y el estado se quedan: son las cifras del negocio.
+  update public.citas
+  set notas_estilista = null
+  where cliente_id = p_cliente_id;
+
+  delete from public.observaciones where cliente_id = p_cliente_id;
+
+  -- `notas_mascota` cae en cascada y `citas.mascota_id` queda nulo
+  -- (`on delete set null`).
+  delete from public.mascotas where dueno_id = p_cliente_id;
+
+  -- Sin celular, `reservar_cita_por_celular` ya no lo encuentra: si esa
+  -- persona vuelve, entra como cliente nueva. `creado_en` no se toca, así que
+  -- los clientes nuevos de su mes siguen contándolo.
+  update public.perfiles
+  set nombre = null,
+      telefono = null,
+      eliminado_en = now()
+  where id = p_cliente_id;
+end;
+$$;
+
+-- Supabase da `execute` a `anon` y `authenticated` por separado: hay que
+-- quitárselo a `anon` de forma explícita.
+revoke all on function public.eliminar_cliente_admin(uuid) from public, anon;
+grant execute on function public.eliminar_cliente_admin(uuid) to authenticated;
+
+-- ===========================================================================
+-- 4e. Foto de la mascota
+-- ===========================================================================
+--
+-- Bucket privado que solo acepta image/webp (maximo 2 MB). La app convierte
+-- la foto a WebP antes de subirla; el bucket lo garantiza igualmente. Solo
+-- la estetica lee, sube y borra.
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('fotos-mascotas', 'fotos-mascotas', false, 2097152, array['image/webp'])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- ===========================================================================
+-- Quién puede tocarlo: solo la estética
+-- ===========================================================================
+--
+-- Sin políticas para clientes ni para `anon`: no leen, no suben, no borran.
+
+create policy "la estética ve las fotos de mascotas"
+  on storage.objects for select
+  to authenticated
+  using (bucket_id = 'fotos-mascotas' and public.es_admin());
+
+create policy "la estética sube fotos de mascotas"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'fotos-mascotas' and public.es_admin());
+
+create policy "la estética cambia fotos de mascotas"
+  on storage.objects for update
+  to authenticated
+  using (bucket_id = 'fotos-mascotas' and public.es_admin())
+  with check (bucket_id = 'fotos-mascotas' and public.es_admin());
+
+create policy "la estética borra fotos de mascotas"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'fotos-mascotas' and public.es_admin());
+
+-- ===========================================================================
+-- 5. Datos de arranque
+-- ===========================================================================
+--
+-- El catalogo es el mismo que hoy esta escrito en
+-- lib/features/booking/data/service_catalog.dart. OJO: esos precios y
+-- duraciones son de muestra, como avisa el propio archivo de Dart. Hay que
+-- reemplazarlos por los de Perro Look antes de ensenarle esto a un cliente
+-- - y la gracia de tenerlos aqui es que para eso ya no hace falta tocar la
+-- app ni publicar una version.
+
+insert into public.servicios
+  (id, nombre, nota, precio_cop, minutos, es_extra, orden)
+values
+  ('bano', 'Baño',
+   'Agua caliente, cepillado y secado.', 35000, 60, false, 1),
+  ('corte_completo', 'Corte completo',
+   'Baño más corte de todo el manto.', 40000, 120, false, 2),
+  ('corte_raza', 'Corte de raza',
+   'Corte acorde al estándar de la raza.', 38000, 120, false, 3),
+  ('cachorro', 'Visita de cachorro',
+   'Primera vez, con calma y sin máquina.', 45000, 120, false, 4),
+  ('unas', 'Corte de uñas',
+   'Incluye limado.', 10000, 10, true, 5),
+  ('oidos', 'Limpieza de oídos',
+   'Revisión y limpieza suave.', 5000, 10, true, 6),
+  ('dientes', 'Limpieza de dientes',
+   'Cepillado con pasta canina.', 12000, 15, true, 7),
+  ('deslanado', 'Deslanado',
+   'Retira el pelo muerto del manto doble.', 30000, 60, true, 8)
+on conflict (id) do update set
+  nombre     = excluded.nombre,
+  nota       = excluded.nota,
+  precio_cop = excluded.precio_cop,
+  minutos    = excluded.minutos,
+  es_extra   = excluded.es_extra,
+  orden      = excluded.orden;
+
+-- Lunes a viernes, manana y tarde. Sabado y domingo no aparecen: un dia sin
+-- filas es un dia cerrado, igual que en la app un DaySchedule sin franjas.
+insert into public.horario_atencion (dia_semana, abre, cierra)
+select dia, abre, cierra
+from generate_series(1, 5) as dia,
+     (values (time '08:00', time '12:00'),
+             (time '14:30', time '18:00')) as franja(abre, cierra)
+on conflict (dia_semana, abre) do update set
+  cierra = excluded.cierra;
+
+-- ===========================================================================
+-- 6. Alta del administrador
+-- ===========================================================================
+--
+-- ANTES de ejecutar esto, crea la cuenta desde el panel:
+--   Authentication > Users > Add user
+--   correo: juanfe20132@gmail.com
+--   contrasena: una de 6 o mas caracteres, elegida por ti
+--
+-- La contrasena no se puede ni se debe escribir en SQL. Supabase la cifra
+-- en auth.users y no acepta inserciones directas hechas a mano.
+--
+-- Despues de crear la cuenta, ejecuta:
+
+insert into public.admins (id, anotacion)
+select id, 'Administradora'
+from auth.users
+where email = 'juanfe20132@gmail.com'
+on conflict (id) do nothing;
+
+-- Verificacion: debe devolver una fila con el correo y la anotacion.
+select a.id, u.email, a.anotacion, a.creado_en
+from public.admins a
+join auth.users u on u.id = a.id
+order by a.creado_en;
+
+-- Si la verificacion devuelve cero filas, la cuenta no existe todavia o el
+-- correo esta escrito distinto. Creala en el panel y repite el insert.
+
+-- ===========================================================================
+-- Fin. Este archivo refleja el esquema actual, con el panel de
+-- administracion: observaciones privadas, citas creadas y editadas desde la
+-- estetica, las consultas del resumen y la gestion de clientes y mascotas
+-- con notas internas.
+-- ===========================================================================

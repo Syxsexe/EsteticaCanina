@@ -39,13 +39,14 @@ class HomeScreen extends StatelessWidget {
                           const BrandLogo(),
                           const SizedBox(height: 32),
                           Text(
-                            'Reserva el baño\nde tu perro en\ndos pasos.',
+                            'Reserva el baño\nde tu perro en\ntres pasos.',
                             style: textTheme.displaySmall,
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'Elige el servicio, escoge un horario libre y tu cita '
-                            'queda confirmada. Sin llamadas y sin esperas.',
+                            'Elige el servicio, escoge un horario libre, dinos '
+                            'quién eres y tu cita queda confirmada. Sin llamadas '
+                            'y sin esperas.',
                             style: textTheme.bodyMedium?.copyWith(
                               color: AppColors.navy.withValues(alpha: 0.75),
                             ),
@@ -77,6 +78,12 @@ class HomeScreen extends StatelessWidget {
                             number: '2',
                             title: 'Elige día y hora',
                             description: 'Solo ves los espacios libres.',
+                          ),
+                          const SizedBox(height: 20),
+                          const _Step(
+                            number: '3',
+                            title: 'Dinos quién eres',
+                            description: 'Tu nombre, tu celular y el de tu perro.',
                           ),
                           const SizedBox(height: 28),
                           ElevatedButton(

@@ -48,10 +48,13 @@ class AgendaEntry {
     required this.minutos,
     required this.estado,
     required this.totalCop,
+    this.clienteId,
     this.clienteNombre,
     this.clienteTelefono,
+    this.mascotaId,
     this.mascotaNombre,
     this.servicios = const [],
+    this.servicioIds = const [],
     this.notasEstilista,
   });
 
@@ -61,14 +64,20 @@ class AgendaEntry {
   final EstadoCita estado;
   final int totalCop;
 
+  final String? clienteId;
+
   /// Nulo mientras el cliente no haya dado su nombre: con cuentas anónimas
   /// es lo normal.
   final String? clienteNombre;
   final String? clienteTelefono;
+  final String? mascotaId;
   final String? mascotaNombre;
 
   /// Los nombres de los servicios, no sus identificadores.
   final List<String> servicios;
+
+  /// Los ids que hacen falta para volver a editar la cita.
+  final List<String> servicioIds;
 
   final String? notasEstilista;
 
@@ -78,16 +87,30 @@ class AgendaEntry {
   /// el resto de la app.
   int get inicioEnMinutos => empieza.hour * 60 + empieza.minute;
 
-  AgendaEntry copyWith({EstadoCita? estado}) => AgendaEntry(
+  AgendaEntry copyWith({
+    EstadoCita? estado,
+    DateTime? empieza,
+    int? minutos,
+    int? totalCop,
+    String? mascotaId,
+    String? mascotaNombre,
+    List<String>? servicios,
+    List<String>? servicioIds,
+    String? notasEstilista,
+  }) =>
+      AgendaEntry(
         id: id,
-        empieza: empieza,
-        minutos: minutos,
+        empieza: empieza ?? this.empieza,
+        minutos: minutos ?? this.minutos,
         estado: estado ?? this.estado,
-        totalCop: totalCop,
+        totalCop: totalCop ?? this.totalCop,
+        clienteId: clienteId,
         clienteNombre: clienteNombre,
         clienteTelefono: clienteTelefono,
-        mascotaNombre: mascotaNombre,
-        servicios: servicios,
-        notasEstilista: notasEstilista,
+        mascotaId: mascotaId ?? this.mascotaId,
+        mascotaNombre: mascotaNombre ?? this.mascotaNombre,
+        servicios: servicios ?? this.servicios,
+        servicioIds: servicioIds ?? this.servicioIds,
+        notasEstilista: notasEstilista ?? this.notasEstilista,
       );
 }

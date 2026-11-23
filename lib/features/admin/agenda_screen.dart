@@ -5,9 +5,15 @@ import '../../core/format/money.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/time/salon_time.dart';
 import '../../core/theme/app_theme.dart';
+import '../booking/data/availability_repository.dart';
+import 'admin_appointment_form_screen.dart';
+import 'data/admin_appointment_repository.dart';
 import 'data/admin_session.dart';
 import 'data/agenda_repository.dart';
+import 'data/customer_directory_repository.dart';
 import 'models/agenda_entry.dart';
+import 'pestana_recargable.dart';
+import 'widgets/estado_cita_chip.dart';
 
 /// La agenda del día, para la estética.
 ///
@@ -24,19 +30,34 @@ class AgendaScreen extends StatefulWidget {
     this.repository,
     this.session,
     this.today,
+    this.embedded = false,
+    this.appointmentsRepository,
+    this.availabilityRepository,
+    this.customersRepository,
   });
 
   final AgendaRepository? repository;
   final AdminSession? session;
 
+  /// Lo que necesita el formulario de "Nueva cita". Si faltan, se usan los
+  /// de siempre, y solo al tocar el botón: los tests que no crean citas no
+  /// tienen por qué montarlos.
+  final AdminAppointmentRepository? appointmentsRepository;
+  final AvailabilityRepository? availabilityRepository;
+  final CustomerDirectoryRepository? customersRepository;
+
   /// Qué día se abre. Se inyecta en los tests; en la app es hoy.
   final DateTime? today;
+
+  /// Cuando vive dentro del panel, no pinta su propia barra ni su salida.
+  final bool embedded;
 
   @override
   State<AgendaScreen> createState() => _AgendaScreenState();
 }
 
-class _AgendaScreenState extends State<AgendaScreen> {
+class _AgendaScreenState extends State<AgendaScreen>
+    implements PestanaRecargable {
   late final AgendaRepository _repositorio;
   late DateTime _dia;
 
@@ -55,6 +76,10 @@ class _AgendaScreenState extends State<AgendaScreen> {
     _dia = DateTime(hoy.year, hoy.month, hoy.day);
     _cargar();
   }
+
+  /// Vuelve a pedir el día que se está viendo, sin moverlo.
+  @override
+  Future<void> recargar() => _cargar();
 
   Future<void> _cargar() async {
     setState(() {
@@ -101,6 +126,26 @@ class _AgendaScreenState extends State<AgendaScreen> {
     }
   }
 
+  /// Abre el formulario en el día que se está viendo. Si ese día ya pasó,
+  /// el formulario abre en hoy. Al guardar se recarga el mismo día.
+  Future<void> _nuevaCita() async {
+    final guardado = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AdminAppointmentFormScreen(
+          appointmentsRepository: widget.appointmentsRepository ??
+              defaultAdminAppointmentRepository(),
+          availabilityRepository: widget.availabilityRepository ??
+              defaultAvailabilityRepository(),
+          customersRepository: widget.customersRepository ??
+              defaultCustomerDirectoryRepository(),
+          hoy: widget.today,
+          diaInicial: _dia,
+        ),
+      ),
+    );
+    if (guardado == true && mounted) await _cargar();
+  }
+
   Future<void> _salir() async {
     final sesion = widget.session ?? defaultAdminSession();
     await sesion.salir();
@@ -110,6 +155,30 @@ class _AgendaScreenState extends State<AgendaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cuerpo = Column(
+      children: [
+        _BarraDeDia(
+          dia: _dia,
+          onAnterior: () => _moverDia(-1),
+          onSiguiente: () => _moverDia(1),
+        ),
+        const Divider(height: 1),
+        Expanded(child: _cuerpo()),
+      ],
+    );
+
+    final botonNuevaCita = FloatingActionButton.extended(
+      onPressed: _nuevaCita,
+      icon: const Icon(Icons.add),
+      label: const Text('Nueva cita'),
+    );
+
+    // Embebida no pinta barra ni salida —eso lo pone el panel—, pero sí su
+    // propio Scaffold: es lo que le da sitio al botón flotante.
+    if (widget.embedded) {
+      return Scaffold(body: cuerpo, floatingActionButton: botonNuevaCita);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('AGENDA'),
@@ -121,17 +190,8 @@ class _AgendaScreenState extends State<AgendaScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _BarraDeDia(
-            dia: _dia,
-            onAnterior: () => _moverDia(-1),
-            onSiguiente: () => _moverDia(1),
-          ),
-          const Divider(height: 1),
-          Expanded(child: _cuerpo()),
-        ],
-      ),
+      body: cuerpo,
+      floatingActionButton: botonNuevaCita,
     );
   }
 
@@ -158,7 +218,8 @@ class _AgendaScreenState extends State<AgendaScreen> {
     return RefreshIndicator(
       onRefresh: _cargar,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        // Abajo deja sitio al botón flotante para que no tape la última cita.
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         itemCount: citas.length,
         separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (_, i) => _Tarjeta(
@@ -255,7 +316,7 @@ class _Tarjeta extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              _Etiqueta(estado: cita.estado),
+              EstadoCitaChip(estado: cita.estado),
             ],
           ),
           const SizedBox(height: 10),
@@ -326,34 +387,6 @@ class _Tarjeta extends StatelessWidget {
               ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _Etiqueta extends StatelessWidget {
-  const _Etiqueta({required this.estado});
-
-  final EstadoCita estado;
-
-  @override
-  Widget build(BuildContext context) {
-    final (fondo, texto) = switch (estado) {
-      EstadoCita.reservada => (AppColors.primarySoft, AppColors.primaryDark),
-      EstadoCita.cumplida => (AppColors.navy, Colors.white),
-      EstadoCita.cancelada => (AppColors.hairline, AppColors.textSecondary),
-      EstadoCita.noAsistio => (AppColors.hairline, AppColors.textSecondary),
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: fondo,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        estado.rotulo.toUpperCase(),
-        style: AppTheme.archivo(size: 11, weight: 700, color: texto),
       ),
     );
   }

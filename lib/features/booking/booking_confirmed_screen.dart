@@ -11,7 +11,7 @@ import 'models/service.dart';
 /// El final del flujo: la cita quedó hecha.
 ///
 /// Es una pantalla terminal. Se llega con `pushAndRemoveUntil`, así que los
-/// dos pasos quedan fuera de la pila y el botón atrás lleva al inicio, no de
+/// tres pasos quedan fuera de la pila y el botón atrás lleva al inicio, no de
 /// vuelta a la hora que se acaba de reservar. Volver allí solo serviría para
 /// reservar dos veces.
 class BookingConfirmedScreen extends StatelessWidget {
