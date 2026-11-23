@@ -467,6 +467,12 @@ begin
   -- verano, asi que la conversion es estable todo el ano.
   v_local := p_empieza at time zone 'America/Bogota';
 
+  -- Un periodo prudente: nada a más de 90 dias vista. Vale para todas las
+  -- vías de reserva (app, panel y asistente), porque todas pasan por aquí.
+  if p_empieza > now() + interval '90 days' then
+    raise exception 'Solo se puede agendar hasta 90 días adelante';
+  end if;
+
   if exists (select 1 from public.cierres where fecha = v_local::date) then
     raise exception 'Ese día la estética está cerrada';
   end if;

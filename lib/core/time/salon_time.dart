@@ -1,4 +1,5 @@
-/// La estética vive en Bogotá; la app, en cualquier parte.
+/// La estética vive en Pasto, con la hora de Colombia (zona `America/Bogota`,
+/// UTC-5); la app, en cualquier parte. Por eso aquí se habla de "Bogotá".
 ///
 /// Todo el razonamiento sobre horarios —que la mañana va de 08:00 a 12:00,
 /// que una cita de dos horas no cabe empezando a las 11:00— ocurre en el

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/navigation/flow_page_route.dart';
 import '../admin/admin_sign_in_screen.dart';
+import '../assistant/assistant_screen.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/brand_logo.dart';
 import '../booking/service_selection_screen.dart';
@@ -93,6 +94,16 @@ class HomeScreen extends StatelessWidget {
                               ),
                             ),
                             child: const Text('Reservar cita'),
+                          ),
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                              FlowPageRoute<void>(
+                                builder: (_) => const AssistantScreen(),
+                              ),
+                            ),
+                            icon: const Icon(Icons.chat_bubble_outline),
+                            label: const Text('Agendar con el asistente'),
                           ),
                           // Discreto a propósito: el cliente no tiene por qué
                           // encontrarse con una puerta que no es suya, pero

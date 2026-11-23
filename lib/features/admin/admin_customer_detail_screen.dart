@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/format/dates.dart';
 import '../../core/format/money.dart';
@@ -271,6 +272,21 @@ class _AdminCustomerDetailScreenState
               PetRef(id: mascota.id!, nombre: mascota.nombre),
         ],
       );
+
+  /// Abre el marcador con el número listo, sin marcarlo. Donde no hay
+  /// marcador (un navegador de escritorio), muestra el número para copiarlo.
+  Future<void> _llamar(String telefono) async {
+    final mensajero = ScaffoldMessenger.of(context);
+    var abierto = false;
+    try {
+      abierto = await launchUrl(Uri(scheme: 'tel', path: telefono));
+    } catch (_) {}
+    if (!abierto) {
+      mensajero.showSnackBar(
+        SnackBar(content: Text('Llama al ${formatTelefono(telefono)}')),
+      );
+    }
+  }
 
   Future<void> _editarContacto() async {
     final editado = await editarContacto(context, cliente: _cliente);
@@ -579,6 +595,12 @@ class _AdminCustomerDetailScreenState
                     ],
                   ),
                 ),
+                if (cliente.telefono != null)
+                  IconButton(
+                    onPressed: () => _llamar(cliente.telefono!),
+                    icon: const Icon(Icons.phone_outlined),
+                    tooltip: 'Llamar',
+                  ),
                 IconButton(
                   onPressed: _editarContacto,
                   icon: const Icon(Icons.edit_outlined),

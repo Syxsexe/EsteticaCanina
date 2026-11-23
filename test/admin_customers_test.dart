@@ -400,6 +400,40 @@ void main() {
     });
   });
 
+  group('llamar al cliente', () {
+    testWidgets('con celular hay botón; sin marcador muestra el número',
+        (tester) async {
+      await abrirDetalle(
+        tester,
+        clientes: SampleCustomerDirectoryRepository(),
+        nombre: 'Ana',
+      );
+
+      // En las pruebas no hay plugin de url_launcher: es el caso "sin
+      // marcador", como un navegador de escritorio.
+      await tester.tap(find.byTooltip('Llamar'));
+      // El canal de la plataforma responde fuera del reloj falso de la
+      // prueba: hay que dejar pasar tiempo real.
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Llama al 300 111 2233'), findsOneWidget);
+    });
+
+    testWidgets('sin celular no hay botón', (tester) async {
+      await abrirDetalle(
+        tester,
+        clientes: SampleCustomerDirectoryRepository(clientes: const [
+          CustomerEntry(id: 'c', nombre: 'Sin Celular', telefono: null, citas: 0),
+        ]),
+        nombre: 'Sin Celular',
+      );
+
+      expect(find.byTooltip('Llamar'), findsNothing);
+    });
+  });
+
   group('eliminar cliente', () {
     test('una cita de un cliente eliminado sale como "Cliente eliminado"', () {
       final cita = agendaEntryDesdeFila({

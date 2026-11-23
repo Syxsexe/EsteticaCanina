@@ -5,6 +5,7 @@ import '../../core/format/money.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/time/salon_time.dart';
+import '../assistant/data/asistente_repository.dart';
 import 'data/analytics_repository.dart';
 import 'models/admin_summary.dart';
 import 'models/month_summary.dart';
@@ -20,12 +21,16 @@ class AdminAnalyticsScreen extends StatefulWidget {
     super.key,
     required this.repository,
     this.hoy,
+    this.asistenteRepository,
   });
 
   final AnalyticsRepository repository;
 
   /// Se inyecta en los tests; en la app es hoy en Bogotá.
   final DateTime? hoy;
+
+  /// Quién escribe el "Resumen con IA". Se inyecta en las pruebas.
+  final AsistenteRepository? asistenteRepository;
 
   @override
   State<AdminAnalyticsScreen> createState() => _AdminAnalyticsScreenState();
@@ -177,6 +182,21 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen>
           _selectorDeMes(),
           const SizedBox(height: 8),
           Text(formatLongDate(hoy), style: Theme.of(context).textTheme.titleMedium),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => _HojaResumenIa(
+                  repository: widget.asistenteRepository ??
+                      defaultAsistenteRepository(),
+                ),
+              ),
+              icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+              label: const Text('Resumen con IA'),
+            ),
+          ),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -468,6 +488,77 @@ class _Kpi extends StatelessWidget {
           const SizedBox(height: 6),
           Text(valor, style: Theme.of(context).textTheme.headlineSmall),
         ],
+      ),
+    );
+  }
+}
+
+/// El parte escrito por IA: se pide al abrir la hoja y se puede reintentar.
+class _HojaResumenIa extends StatefulWidget {
+  const _HojaResumenIa({required this.repository});
+
+  final AsistenteRepository repository;
+
+  @override
+  State<_HojaResumenIa> createState() => _HojaResumenIaState();
+}
+
+class _HojaResumenIaState extends State<_HojaResumenIa> {
+  String? _texto;
+  bool _fallo = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pedir();
+  }
+
+  Future<void> _pedir() async {
+    setState(() {
+      _texto = null;
+      _fallo = false;
+    });
+    try {
+      final texto = await widget.repository.resumen();
+      if (mounted) setState(() => _texto = texto);
+    } catch (_) {
+      if (mounted) setState(() => _fallo = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('RESUMEN CON IA', style: AppTheme.sectionLabel),
+              const SizedBox(height: 12),
+              if (_fallo) ...[
+                Text(
+                  'El asistente no está disponible ahora.',
+                  style: textTheme.bodyMedium,
+                ),
+                TextButton(onPressed: _pedir, child: const Text('Reintentar')),
+              ] else if (_texto == null)
+                const Center(child: CircularProgressIndicator())
+              else
+                Text(
+                  _texto!,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -54,3 +54,6 @@ app.*.map.json
 # el proyecto de otro. example.json si se versiona, como plantilla.
 /env/*.json
 !/env/example.json
+
+# Estado local de la CLI de Supabase (proyecto enlazado)
+/supabase/.temp/

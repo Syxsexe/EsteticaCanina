@@ -16,6 +16,7 @@ migrations/20261124120000_clientes_por_celular.sql    clientes sin cuenta y rese
 migrations/20261125120000_clientes_nuevos_por_mes.sql clientes nuevos de un mes dado (Resumen por mes)
 migrations/20261126120000_eliminar_cliente.sql       eliminar (anonimizar) un cliente desde el panel
 migrations/20261127120000_foto_mascota.sql           foto de la mascota: columna, bucket y políticas
+migrations/20261128120000_limite_agenda.sql          ninguna cita a más de 90 días vista
 seed.sql                                  catálogo y horario de atención
 reset.sql                                 borra todo, para reintentar
 ```
@@ -149,6 +150,75 @@ Comprobación con la anon key:
 
 Volver atrás solo es posible si no se crearon clientes sin cuenta: hay que
 borrarlos o asignarlos a una cuenta antes de recrear `perfiles_id_fkey`.
+
+## Asistente de IA (Edge Function `asistente`)
+
+La función `supabase/functions/asistente/` atiende dos cosas:
+
+- **`modo: "cliente"`**: el chat con el que un cliente agenda una cita. No
+  exige sesión. La IA solo conversa y usa tres herramientas: ver servicios,
+  ver horarios libres de un día y reservar. La reserva pasa por
+  `reservar_cita_por_celular`, así que precio, duración, solapes y quién es el
+  cliente los decide la base, como en la reserva normal.
+- **`modo: "resumen"`**: el "Resumen con IA" de la pestaña Resumen. Exige el
+  JWT de una administradora, comprobado con `es_admin()`, y responde 403 a
+  cualquier otro.
+
+La función usa la anon key, o el JWT de quien llama en el modo resumen.
+**Nunca** usa la `service_role`.
+
+**Proveedor:** Gemini (`generateContent`), con el modelo de `GEMINI_MODEL`
+(por defecto `gemini-3.8-flash`) y el razonamiento en `low`. El plan
+gratuito se satura a menudo: ante un 429 o un 503, la función reintenta una
+vez y luego usa `GEMINI_MODEL_RESPALDO` (por defecto `gemini-3.5-flash-lite`).
+Aun así, cada respuesta con herramientas tarda entre 20 y 60 s en el plan
+gratuito. Todo lo que depende del proveedor está en
+`modelo.ts`. Para pasar a Claude u otro, se reescriben ahí `conversar`,
+`mensajeUsuario` y `resultadosHerramientas`; nada más cambia.
+
+> **Aviso de datos.** En el plan gratuito de Gemini, Google usa lo que se le
+> envía para mejorar sus productos. El chat y el resumen mandan nombres y
+> celulares de clientes, así que con ese plan el asistente es **solo para
+> pruebas con datos inventados**. Para clientes reales hay que pasar a un
+> plan de pago o a otro proveedor (Ley 1581).
+
+### Ponerlo en marcha
+
+1. Crea una clave gratis en aistudio.google.com (*Get API key*).
+2. En Supabase, ve a *Edge Functions → Secrets* y crea `GEMINI_API_KEY` con
+   esa clave. **Nunca** la pegues en la app, en `env/` ni en el repo.
+   `GEMINI_MODEL` es opcional.
+3. Despliega la función **sin verificación de JWT**, porque el modo cliente
+   no tiene sesión:
+   - **Desde el panel:** *Edge Functions → Deploy a new function → Via
+     Editor*, con el nombre `asistente`. Pega `index.ts`, `modelo.ts` y
+     `horarios.ts`, y desactiva *Enforce JWT verification*.
+   - **Con la CLI:** `npx supabase login`, luego `npx supabase link
+     --project-ref <ref>` y `npx supabase functions deploy asistente
+     --no-verify-jwt`.
+4. Comprueba que responde:
+
+   ```bash
+   curl -X POST "$SUPABASE_URL/functions/v1/asistente"      -H "apikey: $ANON_KEY" -H "Content-Type: application/json"      -d '{"modo":"cliente","historial":[],"texto":"¿cuánto cuesta un baño?"}'
+   ```
+
+   Debe contestar con el precio real. El mismo `curl` con
+   `{"modo":"resumen"}` y sin sesión debe dar `403`.
+
+Sin la función o sin la clave, la app muestra "El asistente no está
+disponible ahora" y ofrece la reserva normal. El resto sigue igual.
+
+**Topes:**
+
+- 1000 caracteres por mensaje;
+- 4 rondas de herramientas por turno;
+- 40 entradas de historial por conversación.
+
+No hay límite por IP: con el plan gratuito, lo peor que pasa es agotar la
+cuota y que el asistente quede "no disponible" un rato.
+
+La lógica pura (horarios libres, celular y hora de Bogotá) se prueba con
+`node --test supabase/functions/asistente/horarios.test.ts`.
 
 ## Foto de la mascota
 

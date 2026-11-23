@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Perro Look: Flutter booking app for a Bogotá dog-grooming salon ("estética canina"). Supabase backend, Spanish UI.
+Perro Look: Flutter booking app for a dog-grooming salon ("estética canina") in Pasto, Colombia. Time code says "Bogotá" because that is the Colombia time zone name (`America/Bogota`, UTC-5); the salon is not in Bogotá. Supabase backend, Spanish UI.
 
 ## Commands
 
@@ -31,6 +31,16 @@ On this Windows machine, `flutter`/`dart` may be blocked by Device Guard (`dart.
 - SQL order: files in `supabase/migrations/` lexicographically, then `supabase/seed.sql`. `reset.sql` wipes everything for a retry. Apply in the Supabase dashboard SQL Editor; no Supabase CLI/Docker is assumed.
 - `lib/core/time/salon_time.dart` is the only timezone boundary: fixed Bogotá UTC-5. Never use `toLocal()` or device-local time for appointments; use `enHoraEstetica`, `desdeHoraEstetica`, `hoyEnLaEstetica`.
 - `anon` key is public by design; RLS protects data. Never put `service_role` in the client.
+
+## AI assistant (Edge Function)
+
+- `supabase/functions/asistente/` (Deno): client booking chat (`modo: "cliente"`, no session) and admin AI summary (`modo: "resumen"`, JWT + `es_admin()`, else 403). Uses the anon key or the caller's JWT, never `service_role`.
+- `modelo.ts` is the ONLY file that knows the AI provider (Gemini `generateContent`, secret `GEMINI_API_KEY`, optional `GEMINI_MODEL`). Switching providers means rewriting `conversar`, `mensajeUsuario`, `resultadosHerramientas` there. The chat history is opaque and must be returned to the provider unchanged (Gemini 3 `thoughtSignature`).
+- The AI never decides price/duration/overlaps: bookings go through `reservar_cita_por_celular`. Gemini free tier uses data for training: test data only until a paid plan.
+- Prompt injection: the model only gets tools that anyone could already call with the anon key, and the database re-validates everything. The client-held history is untrusted: `historialValido` allows only roles `user`/`model` and the part types `modelo.ts` produces, with a size cap. Text written by clients (owner/pet names) goes into prompts only through `textoSeguro` and inside `<datos>` marked as records, never instructions. Never give the model a tool with more power than the caller has.
+- SQL injection: queries go through PostgREST/RPC parameters. Never build SQL from text (`execute` with input in plpgsql) or PostgREST filter strings from user text (`.or()`, `.filter()`); every `security definer` function sets `search_path`.
+- Deploy with JWT verification disabled. Pure logic tests: `node --test supabase/functions/asistente/horarios.test.ts` and `npx -y deno@2 test --no-check --allow-env supabase/functions/asistente/modelo.test.ts`; type-check: `npx -y deno@2 check supabase/functions/asistente/index.ts`.
+- App side: `lib/features/assistant/` (`AsistenteRepository`, `AssistantScreen`); calls via `functions.invoke('asistente')`.
 
 ## Conventions
 
