@@ -308,14 +308,20 @@ class _Tarjeta extends StatelessWidget {
                 style: textTheme.titleLarge,
               ),
               const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  formatDuration(cita.minutos),
-                  style: textTheme.bodySmall,
+              // La duración cede sitio: en un teléfono angosto se recorta
+              // con "…" antes que empujar la etiqueta de estado fuera.
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    formatDuration(cita.minutos),
+                    style: textTheme.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               EstadoCitaChip(estado: cita.estado),
             ],
           ),

@@ -361,23 +361,44 @@ class _TarjetaHistorial extends StatelessWidget {
               Text(cita.notasEstilista!, style: textTheme.bodySmall),
             ],
             const SizedBox(height: 10),
-            Row(
+            // Un Wrap y no una Row: en un teléfono de 360 px, o con la letra
+            // del sistema más grande, el total y los dos botones no caben en
+            // una línea. Así los botones bajan a la siguiente en vez de
+            // desbordarse.
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 4,
               children: [
-                Text('TOTAL', style: AppTheme.sectionLabel),
-                const SizedBox(width: 8),
-                Text(formatCop(cita.totalCop), style: textTheme.titleMedium),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: onEditar,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Editar'),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('TOTAL', style: AppTheme.sectionLabel),
+                    const SizedBox(width: 8),
+                    Text(
+                      formatCop(cita.totalCop),
+                      style: textTheme.titleMedium,
+                    ),
+                  ],
                 ),
-                if (onCancelar != null)
-                  TextButton.icon(
-                    onPressed: onCancelar,
-                    icon: const Icon(Icons.block, size: 18),
-                    label: const Text('Eliminar'),
-                  ),
+                // Wrap también aquí: los dos botones juntos pueden medir más
+                // que la tarjeta entera con letra grande.
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      onPressed: onEditar,
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('Editar'),
+                    ),
+                    if (onCancelar != null)
+                      TextButton.icon(
+                        onPressed: onCancelar,
+                        icon: const Icon(Icons.block, size: 18),
+                        label: const Text('Eliminar'),
+                      ),
+                  ],
+                ),
               ],
             ),
           ],

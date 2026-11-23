@@ -488,6 +488,79 @@ void main() {
     expect(citas.llamadas, 3);
   });
 
+  group('en un teléfono angosto no se desborda', () {
+    /// Como el Redmi Note 8 Pro: 360 px de ancho y la letra del sistema
+    /// un poco más grande. Un desborde lanza una excepción que la prueba
+    /// recoge con `takeException`.
+    Future<void> enTelefono(WidgetTester tester, Widget pantalla) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(360, 800),
+            textScaler: TextScaler.linear(1.15),
+          ),
+          child: pantalla,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+
+    testWidgets('historial con Editar y Eliminar', (tester) async {
+      await enTelefono(
+        tester,
+        AdminHistoryScreen(
+          appointmentsRepository: CitasFake([
+            cita(
+              id: 'a',
+              empieza: lunes.add(const Duration(days: 1, hours: 11)),
+              clienteNombre: 'Prueba',
+            ),
+          ]),
+          customersRepository: SampleCustomerDirectoryRepository(),
+          availabilityRepository: const SampleAvailabilityRepository(),
+          today: lunes,
+          now: lunes,
+        ),
+      );
+      expect(find.text('Eliminar'), findsOneWidget);
+    });
+
+    testWidgets('el panel entero, pestaña por pestaña', (tester) async {
+      await enTelefono(
+        tester,
+        AdminShellScreen(
+          analyticsRepository: SampleAnalyticsRepository(hoy: lunes),
+          appointmentsRepository: SampleAdminAppointmentRepository(hoy: lunes),
+          customersRepository: SampleCustomerDirectoryRepository(),
+          agendaRepository: SampleAgendaRepository(),
+          availabilityRepository: const SampleAvailabilityRepository(),
+          session: SessionFake(),
+          today: lunes,
+          now: lunes,
+        ),
+      );
+      for (final pestana in ['Agenda', 'Historial', 'Clientes', 'Resumen']) {
+        await tester.tap(find.text(pestana));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: pestana);
+      }
+
+      // Y el detalle de un cliente, con su mascota.
+      await tester.tap(find.text('Clientes'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ana'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'detalle de Ana');
+    });
+  });
+
   group('errores al guardar una cita', () {
     Future<void> intentarCrear(WidgetTester tester, Object error) async {
       tester.view.physicalSize = const Size(900, 2400);

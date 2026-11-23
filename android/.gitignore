@@ -12,3 +12,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Salida de Gradle (AGP 9 la crea aquí además de en /build de la raíz).
+/build/
