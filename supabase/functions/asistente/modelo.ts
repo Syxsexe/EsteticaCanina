@@ -20,9 +20,9 @@ export interface Llamada {
   argumentos: Record<string, unknown>;
 }
 
-// shortcut: Gemini 3.8 Flash del plan gratuito, que usa lo enviado para
+// shortcut: Gemini 4 Hydrogen del plan gratuito, que usa lo enviado para
 // mejorar los productos de Google. Solo datos inventados hasta pasar a pago.
-const MODELO = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
+const MODELO = Deno.env.get("GEMINI_MODEL") ?? "gemini-4-hydrogen";
 
 // El plan gratuito se satura a menudo ("high demand", 503) o agota la cuota
 // por minuto (429). Se reintenta una vez y luego se pasa a un modelo más

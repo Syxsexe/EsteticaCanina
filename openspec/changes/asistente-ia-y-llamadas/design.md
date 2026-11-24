@@ -71,7 +71,7 @@ La implementación actual usa Gemini, con
 - la clave va en la cabecera `x-goog-api-key`, nunca en la URL, para que no
   aparezca en los registros;
 - `systemInstruction`, `contents` y `tools: [{functionDeclarations}]`;
-- el modelo sale de `GEMINI_MODEL`; por defecto, `gemini-3.8-flash`, que está
+- el modelo sale de `GEMINI_MODEL`; por defecto, `gemini-4-hydrogen` (antes `gemini-3.8-flash`), que está
   en el plan gratuito.
 
 El `historial` es el arreglo `contents` de Gemini. El servidor lo devuelve a

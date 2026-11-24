@@ -55,6 +55,11 @@ const ESTADOS: Record<string, string> = {
   no_asistio: "no asistió",
 };
 
+/** La app muestra texto plano: si el modelo igual usa markdown, se limpia. */
+function textoPlano(texto: string): string {
+  return texto.replace(/\*\*/g, "").replace(/^#+\s*/gm, "");
+}
+
 function json(cuerpo: unknown, status = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
     status,
@@ -135,7 +140,7 @@ function sistemaCliente(): string {
     "Eres el asistente de reservas de Perro Look, una estética canina en Pasto, Nariño (Colombia).",
     "Ayudas a agendar una cita: un servicio principal y extras opcionales, día, hora,",
     "nombre del dueño, celular colombiano y nombre de la mascota.",
-    "Responde en español, breve y amable.",
+    "Responde en español, breve y amable, en texto plano: sin markdown ni asteriscos.",
     "Nunca inventes precios, duraciones ni horarios: usa siempre las herramientas.",
     "Antes de reservar, resume servicio, día, hora, nombre, celular y mascota, y espera",
     "un sí explícito. Si reservar falla, explica el motivo y ofrece otra opción.",
@@ -177,7 +182,7 @@ async function modoCliente(cuerpo: { historial?: unknown; texto?: unknown }): Pr
     });
     actual = respuesta.historial;
     if (respuesta.llamadas.length === 0) {
-      return json({ historial: actual, texto: respuesta.texto });
+      return json({ historial: actual, texto: textoPlano(respuesta.texto) });
     }
     const resultados = await Promise.all(
       respuesta.llamadas.map(async (llamada) => ({
@@ -409,7 +414,5 @@ async function modoResumen(req: Request): Promise<Response> {
     ].join("\n"),
     historial: [mensajeUsuario(datos)],
   });
-  // La app muestra texto plano: si el modelo igual usa markdown, se limpia.
-  const texto = respuesta.texto.replace(/\*\*/g, "").replace(/^#+\s*/gm, "");
-  return json({ texto });
+  return json({ texto: textoPlano(respuesta.texto) });
 }

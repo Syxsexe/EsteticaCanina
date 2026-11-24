@@ -168,7 +168,7 @@ La función usa la anon key, o el JWT de quien llama en el modo resumen.
 **Nunca** usa la `service_role`.
 
 **Proveedor:** Gemini (`generateContent`), con el modelo de `GEMINI_MODEL`
-(por defecto `gemini-3.8-flash`) y el razonamiento en `low`. El plan
+(por defecto `gemini-4-hydrogen`) y el razonamiento en `low`. El plan
 gratuito se satura a menudo: ante un 429 o un 503, la función reintenta una
 vez y luego usa `GEMINI_MODEL_RESPALDO` (por defecto `gemini-3.5-flash-lite`).
 Aun así, cada respuesta con herramientas tarda entre 20 y 60 s en el plan
