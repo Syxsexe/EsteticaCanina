@@ -13,6 +13,7 @@ import 'data/agenda_repository.dart';
 import 'data/customer_directory_repository.dart';
 import 'models/agenda_entry.dart';
 import 'pestana_recargable.dart';
+import 'recordatorio.dart';
 import 'widgets/estado_cita_chip.dart';
 
 /// La agenda del día, para la estética.
@@ -59,6 +60,7 @@ class AgendaScreen extends StatefulWidget {
 class _AgendaScreenState extends State<AgendaScreen>
     implements PestanaRecargable {
   late final AgendaRepository _repositorio;
+  late final DateTime _hoy;
   late DateTime _dia;
 
   List<AgendaEntry>? _citas;
@@ -73,7 +75,8 @@ class _AgendaScreenState extends State<AgendaScreen>
     super.initState();
     _repositorio = widget.repository ?? defaultAgendaRepository();
     final hoy = widget.today ?? hoyEnLaEstetica();
-    _dia = DateTime(hoy.year, hoy.month, hoy.day);
+    _hoy = DateTime(hoy.year, hoy.month, hoy.day);
+    _dia = _hoy;
     _cargar();
   }
 
@@ -132,11 +135,13 @@ class _AgendaScreenState extends State<AgendaScreen>
     final guardado = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => AdminAppointmentFormScreen(
-          appointmentsRepository: widget.appointmentsRepository ??
+          appointmentsRepository:
+              widget.appointmentsRepository ??
               defaultAdminAppointmentRepository(),
-          availabilityRepository: widget.availabilityRepository ??
-              defaultAvailabilityRepository(),
-          customersRepository: widget.customersRepository ??
+          availabilityRepository:
+              widget.availabilityRepository ?? defaultAvailabilityRepository(),
+          customersRepository:
+              widget.customersRepository ??
               defaultCustomerDirectoryRepository(),
           hoy: widget.today,
           diaInicial: _dia,
@@ -226,6 +231,7 @@ class _AgendaScreenState extends State<AgendaScreen>
           cita: citas[i],
           guardando: _guardando.contains(citas[i].id),
           onMarcar: (estado) => _marcar(citas[i], estado),
+          onRecordar: () => mostrarRecordatorio(context, citas[i], _hoy),
         ),
       ),
     );
@@ -280,11 +286,13 @@ class _Tarjeta extends StatelessWidget {
     required this.cita,
     required this.guardando,
     required this.onMarcar,
+    required this.onRecordar,
   });
 
   final AgendaEntry cita;
   final bool guardando;
   final ValueChanged<EstadoCita> onMarcar;
+  final VoidCallback onRecordar;
 
   @override
   Widget build(BuildContext context) {
@@ -337,7 +345,23 @@ class _Tarjeta extends StatelessWidget {
             style: textTheme.bodySmall,
           ),
           if (cita.clienteTelefono != null)
-            Text(cita.clienteTelefono!, style: textTheme.bodySmall),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    cita.clienteTelefono!,
+                    style: textTheme.bodySmall,
+                  ),
+                ),
+                // Solo tiene sentido recordar una cita que sigue en pie.
+                if (cita.estado == EstadoCita.reservada)
+                  TextButton.icon(
+                    onPressed: onRecordar,
+                    icon: const Icon(Icons.notifications_outlined, size: 18),
+                    label: const Text('Recordar'),
+                  ),
+              ],
+            ),
           const SizedBox(height: 10),
           Text(cita.servicios.join(' · '), style: textTheme.bodyMedium),
           if (cita.notasEstilista != null) ...[
