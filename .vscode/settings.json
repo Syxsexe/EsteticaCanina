@@ -1,0 +1,8 @@
+{
+  // Solo las funciones de Supabase son Deno; el resto del proyecto es Flutter.
+  "deno.enablePaths": ["supabase/functions"],
+  "deno.lint": true,
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  }
+}
